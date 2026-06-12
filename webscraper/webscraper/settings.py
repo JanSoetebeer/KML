@@ -70,6 +70,16 @@ S3_ENABLED = os.getenv("S3_ENABLED", "false").lower() == "true"
 S3_BUCKET = os.getenv("S3_BUCKET", "")
 
 # ---------------------------------------------------------------------------
+# Job orchestration
+# ---------------------------------------------------------------------------
+
+# Max number of URL jobs to crawl concurrently in a single batch run.
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "10"))
+
+# Persistent registry of already-scraped URLs (loop / re-scrape guard).
+VISITED_STORE_PATH = os.getenv("VISITED_STORE_PATH", "state/visited.json")
+
+# ---------------------------------------------------------------------------
 # Item pipelines
 #
 # Priority order: lower number = runs first.

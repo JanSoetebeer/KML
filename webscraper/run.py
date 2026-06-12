@@ -1,15 +1,29 @@
 """
 CLI entrypoint for the webscraper.
 
+Each URL is run as its own job (its own spider + job_id). Up to --max-jobs
+jobs run concurrently (default from settings.MAX_CONCURRENT_JOBS = 10).
+Already-scraped URLs are skipped via the persistent visited store unless
+--force is given.
+
 Usage
 -----
-    python run.py <url> [--job-id <id>] [--log-level DEBUG|INFO|WARNING]
+    python run.py <url> [<url> ...] [options]
+    python run.py --urls-file urls.txt [options]
+
+Options
+-------
+    --urls-file FILE   Read URLs (one per line, '#' comments allowed) from FILE.
+    --max-jobs N       Max concurrent jobs (default: settings value, 10).
+    --force            Re-scrape URLs even if already in the visited store.
+    --log-level LEVEL  DEBUG | INFO | WARNING | ERROR (default INFO).
+    --no-ping          Skip the reachability probe during URL validation.
 
 Examples
 --------
-    python run.py https://example.com/resources
-    python run.py https://example.com/docs --log-level DEBUG
-    python run.py https://example.com --job-id my-run-001
+    python run.py https://example.com/docs
+    python run.py https://a.com https://b.com https://c.com --max-jobs 3
+    python run.py --urls-file urls.txt --force
 """
 
 import argparse
@@ -17,6 +31,7 @@ import logging
 import os
 import sys
 import uuid
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -24,22 +39,37 @@ load_dotenv()
 
 os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "webscraper.settings")
 
-from scrapy.crawler import CrawlerProcess
 from scrapy.utils.project import get_project_settings
 
+from webscraper.jobs.job_runner import JobRunner
+from webscraper.state.visited_store import JsonVisitedStore
 from webscraper.utils.logging_config import configure as configure_logging
-from webscraper.validators.url_validator import URLValidationError, validate
 
 
 def parse_args(argv=None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Webscraper — download documents from a given URL."
+        description="Webscraper — download documents from one or more URLs."
     )
-    parser.add_argument("url", help="Seed URL to scrape (http/https).")
     parser.add_argument(
-        "--job-id",
+        "urls",
+        nargs="*",
+        help="One or more seed URLs to scrape (http/https).",
+    )
+    parser.add_argument(
+        "--urls-file",
         default=None,
-        help="Unique run identifier (default: auto-generated UUID).",
+        help="Path to a file with one URL per line ('#' comments allowed).",
+    )
+    parser.add_argument(
+        "--max-jobs",
+        type=int,
+        default=None,
+        help="Max concurrent jobs (default: settings.MAX_CONCURRENT_JOBS).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Re-scrape URLs even if already recorded in the visited store.",
     )
     parser.add_argument(
         "--log-level",
@@ -50,59 +80,107 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument(
         "--no-ping",
         action="store_true",
-        help="Skip the HEAD-request reachability check during URL validation.",
+        help="Skip the reachability probe during URL validation.",
     )
     return parser.parse_args(argv)
 
 
-def run(url: str, job_id: str, log_level: str = "INFO", ping: bool = True) -> int:
+def _collect_urls(args: argparse.Namespace) -> list[str]:
+    """Merge positional URLs and --urls-file into a deduplicated, ordered list."""
+    urls: list[str] = list(args.urls)
+    if args.urls_file:
+        file_path = Path(args.urls_file)
+        for line in file_path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                urls.append(line)
+    # Preserve order while dropping duplicates
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            ordered.append(u)
+    return ordered
+
+
+def run_batch(
+    urls: list[str],
+    log_level: str = "INFO",
+    max_jobs: int | None = None,
+    ping: bool = True,
+    force: bool = False,
+    batch_id: str | None = None,
+) -> int:
     """
-    Validate *url* and start the document spider.
+    Run a batch of URLs as concurrent jobs.
 
     Returns
     -------
     int
-        Exit code: 0 on success, 1 on validation failure, 2 on crawl error.
+        Exit code: 0 if no job errored, 1 if no URLs supplied,
+        2 if one or more jobs errored.
     """
-    configure_logging(job_id=job_id, level=log_level)
+    batch_id = batch_id or uuid.uuid4().hex
+    configure_logging(job_id=batch_id, level=log_level)
     logger = logging.getLogger(__name__)
 
-    logger.info("=== webscraper job started  job_id=%s ===", job_id)
-
-    # --- URL validation -------------------------------------------------------
-    try:
-        validated_url = validate(url, ping=ping)
-    except URLValidationError as exc:
-        logger.error("URL validation failed: %s", exc)
+    if not urls:
+        logger.error("No URLs supplied. Provide URLs or --urls-file.")
         return 1
 
-    # --- Spider ---------------------------------------------------------------
-    from webscraper.spiders.document_spider import DocumentSpider
+    logger.info("=== webscraper batch started  batch_id=%s ===", batch_id)
 
     settings = get_project_settings()
     settings.set("LOG_LEVEL", log_level)
 
-    process = CrawlerProcess(settings)
-    process.crawl(DocumentSpider, start_url=validated_url, job_id=job_id)
+    if max_jobs is None:
+        max_jobs = settings.getint("MAX_CONCURRENT_JOBS", 10)
 
-    try:
-        process.start()
-    except Exception as exc:
-        logger.error("Crawl process raised an unexpected error: %s", exc)
-        return 2
+    store = JsonVisitedStore(settings.get("VISITED_STORE_PATH", "state/visited.json"))
 
-    logger.info("=== webscraper job finished  job_id=%s ===", job_id)
-    return 0
+    # One job_id per URL
+    jobs = [(url, uuid.uuid4().hex) for url in urls]
+
+    runner = JobRunner(
+        settings=settings,
+        visited_store=store,
+        max_concurrent=max_jobs,
+        ping=ping,
+        force=force,
+    )
+    summary = runner.run(jobs)
+
+    counts = summary.counts()
+    logger.info("=== webscraper batch finished  batch_id=%s  %s ===", batch_id, counts)
+    return 2 if counts.get("error", 0) else 0
+
+
+def run(url: str, job_id: str, log_level: str = "INFO", ping: bool = True) -> int:
+    """
+    Single-URL entry point (used by the AWS Lambda handler).
+
+    Thin wrapper around :func:`run_batch` for one URL so the CLI and Lambda
+    share the same job-running code path.
+    """
+    return run_batch(
+        urls=[url],
+        log_level=log_level,
+        max_jobs=1,
+        ping=ping,
+        batch_id=job_id,
+    )
 
 
 def main(argv=None) -> None:
     args = parse_args(argv)
-    job_id = args.job_id or uuid.uuid4().hex
-    exit_code = run(
-        url=args.url,
-        job_id=job_id,
+    urls = _collect_urls(args)
+    exit_code = run_batch(
+        urls=urls,
         log_level=args.log_level,
+        max_jobs=args.max_jobs,
         ping=not args.no_ping,
+        force=args.force,
     )
     sys.exit(exit_code)
 
