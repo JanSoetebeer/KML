@@ -9,8 +9,30 @@ from webscraper.spiders.base_spider import BaseSpider
 
 logger = logging.getLogger(__name__)
 
-# File extensions this spider targets
+# Default file extensions this spider targets if none are supplied.
 TARGET_EXTENSIONS = {".pdf", ".doc", ".docx"}
+
+# HTML attributes scanned for downloadable links (covers documents, images and
+# media). Each is a CSS selector returning a URL-bearing attribute.
+_LINK_SELECTORS = (
+    "a::attr(href)",
+    "link::attr(href)",
+    "img::attr(src)",
+    "source::attr(src)",
+    "audio::attr(src)",
+    "video::attr(src)",
+)
+
+
+def _normalize_extensions(file_types) -> set:
+    """Normalise a list like ['pdf', '.PNG'] into {'.pdf', '.png'}."""
+    normalized = set()
+    for ft in file_types or []:
+        ft = str(ft).strip().lower()
+        if not ft:
+            continue
+        normalized.add(ft if ft.startswith(".") else "." + ft)
+    return normalized
 
 
 class DocumentSpider(BaseSpider):
@@ -37,10 +59,18 @@ class DocumentSpider(BaseSpider):
 
     name = "document"
 
-    def __init__(self, start_url: str, *args, **kwargs):
+    def __init__(self, start_url: str, *args, file_types=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_urls = [start_url]
-        logger.info("[%s] DocumentSpider targeting: %s", self.job_id, start_url)
+        self.target_extensions = _normalize_extensions(file_types) or set(
+            TARGET_EXTENSIONS
+        )
+        logger.info(
+            "[%s] DocumentSpider targeting: %s  extensions=%s",
+            self.job_id,
+            start_url,
+            sorted(self.target_extensions),
+        )
 
     def parse(self, response, **kwargs):
         """
@@ -49,12 +79,20 @@ class DocumentSpider(BaseSpider):
         page_url = response.url
         logger.info("[%s] Parsing page: %s", self.job_id, page_url)
 
-        links = response.css("a::attr(href)").getall()
-        logger.debug("[%s] Found %d raw links on %s", self.job_id, len(links), page_url)
+        candidates = set()
+        for selector in _LINK_SELECTORS:
+            for href in response.css(selector).getall():
+                if href and href.strip():
+                    candidates.add(urljoin(page_url, href.strip()))
+        logger.debug(
+            "[%s] Found %d candidate link(s) on %s",
+            self.job_id,
+            len(candidates),
+            page_url,
+        )
 
         found = 0
-        for href in links:
-            absolute_url = urljoin(page_url, href.strip())
+        for absolute_url in candidates:
             if self._is_target_url(absolute_url):
                 found += 1
                 logger.debug("[%s] Queuing document: %s", self.job_id, absolute_url)
@@ -104,8 +142,7 @@ class DocumentSpider(BaseSpider):
             repr(failure.value),
         )
 
-    @staticmethod
-    def _is_target_url(url: str) -> bool:
+    def _is_target_url(self, url: str) -> bool:
         """Return True if *url* ends with one of the target extensions."""
         path = urlparse(url).path.lower()
-        return any(path.endswith(ext) for ext in TARGET_EXTENSIONS)
+        return any(path.endswith(ext) for ext in self.target_extensions)

@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Webscraper – Anwendung</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">Webscraper</div>
+    <div class="user-info">
+      Angemeldet als <b id="current-username">…</b>
+      (<span id="current-position">…</span>)
+      <button class="secondary" id="logout-btn" style="margin-left:1rem">Abmelden</button>
+    </div>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="tab-scrape">Scraping</button>
+    <button class="tab-btn" data-tab="tab-users">Benutzerverwaltung</button>
+    <button class="tab-btn admin-only" data-tab="tab-models">KI-Modelle</button>
+  </nav>
+
+  <main class="content">
+    <!-- Abschnitt 1: Scraping -->
+    <section class="tab-panel active" id="tab-scrape">
+
+      <div class="card">
+        <h2>Quelle</h2>
+        <div class="field-row">
+          <label for="sc-url">URL</label>
+          <input type="text" id="sc-url" placeholder="https://example.com/resources" />
+        </div>
+        <div class="field-row">
+          <label for="sc-file">oder Datei (CSV / HTML)</label>
+          <input type="file" id="sc-file" accept=".csv,.html,.htm" />
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Dateiformate</h2>
+        <p class="muted">Mindestens ein Format auswählen.</p>
+        <div id="sc-filetypes"></div>
+      </div>
+
+      <div class="card">
+        <h2>KI-Modell</h2>
+        <div class="field-row">
+          <label for="sc-model">Modell</label>
+          <select id="sc-model"></select>
+        </div>
+        <p class="muted" id="sc-model-empty" style="display:none">
+          Für Ihre Rollen ist kein KI-Modell freigegeben.
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="btn-row">
+          <button id="sc-start" disabled>Scrapen starten</button>
+          <span class="muted" id="sc-hint"></span>
+        </div>
+        <h3>Log (letzter Lauf)</h3>
+        <pre class="log-view" id="sc-log">Noch kein Lauf gestartet.</pre>
+      </div>
+
+    </section>
+
+    <!-- Abschnitt 2: Benutzerverwaltung -->
+    <section class="tab-panel" id="tab-users">
+
+      <!-- Neuen Benutzer anlegen (nur Administrator) -->
+      <div class="card admin-only">
+        <h2>Neuen Benutzer anlegen</h2>
+        <div class="field-row">
+          <label for="cu-username">Benutzername</label>
+          <input type="text" id="cu-username" autocomplete="off" />
+        </div>
+        <div class="field-row">
+          <label for="cu-password">Passwort</label>
+          <input type="password" id="cu-password" autocomplete="new-password" />
+        </div>
+        <div class="field-row">
+          <label for="cu-admin">Administrator</label>
+          <input type="checkbox" id="cu-admin" style="justify-self:start; width:auto" />
+        </div>
+        <div class="field-row">
+          <label for="cu-role">Rolle</label>
+          <select id="cu-role"></select>
+        </div>
+        <div class="btn-row">
+          <button id="cu-create">Anlegen</button>
+          <button class="secondary" id="cu-discard">Verwerfen</button>
+        </div>
+        <div class="notification success" id="cu-note"></div>
+      </div>
+
+      <!-- Neue Rolle anlegen (nur Administrator) -->
+      <div class="card admin-only">
+        <h2>Neue Rolle anlegen</h2>
+        <div class="field-row">
+          <label for="cr-name">Bezeichnung</label>
+          <input type="text" id="cr-name" autocomplete="off" />
+        </div>
+        <div class="btn-row">
+          <button id="cr-create">Anlegen</button>
+          <button class="secondary" id="cr-discard">Verwerfen</button>
+        </div>
+        <div class="notification success" id="cr-note"></div>
+      </div>
+
+      <!-- Rollen eines Benutzers verwalten (nur Administrator) -->
+      <div class="card admin-only">
+        <h2>Rollen verwalten</h2>
+        <div class="field-row">
+          <label for="ru-user">Benutzer</label>
+          <select id="ru-user"></select>
+        </div>
+        <h3>Zugewiesene Rollen</h3>
+        <ul id="ru-roles" class="role-list"><li class="muted">Bitte Benutzer wählen.</li></ul>
+        <div class="field-row">
+          <label for="ru-add-role">Rolle hinzufügen</label>
+          <select id="ru-add-role"></select>
+        </div>
+        <div class="btn-row">
+          <button id="ru-add">Hinzufügen</button>
+        </div>
+        <div class="notification success" id="ru-note"></div>
+      </div>
+
+      <!-- Eigenes Passwort ändern (alle Benutzer) -->
+      <div class="card">
+        <h2>Passwort ändern</h2>
+        <div class="field-row">
+          <label for="pw-current">Aktuelles Passwort</label>
+          <input type="password" id="pw-current" autocomplete="off" />
+        </div>
+        <div class="field-row">
+          <label for="pw-new">Neues Passwort</label>
+          <input type="password" id="pw-new" autocomplete="new-password" />
+        </div>
+        <div class="field-row">
+          <label for="pw-confirm">Neues Passwort (Wdh.)</label>
+          <input type="password" id="pw-confirm" autocomplete="new-password" />
+        </div>
+        <div class="btn-row">
+          <button id="pw-update">Aktualisieren</button>
+        </div>
+        <div class="notification" id="pw-note"></div>
+      </div>
+
+    </section>
+
+    <!-- Abschnitt 3: KI-Modelle (nur Administrator) -->
+    <section class="tab-panel" id="tab-models">
+
+      <!-- Upload -->
+      <div class="card">
+        <h2>KI-Modell hochladen</h2>
+        <div class="field-row">
+          <label for="mu-file">Datei</label>
+          <input type="file" id="mu-file" />
+        </div>
+        <div class="btn-row">
+          <button id="mu-upload">Hochladen</button>
+        </div>
+        <div class="notification" id="mu-note"></div>
+      </div>
+
+      <!-- Matrix -->
+      <div class="card">
+        <h2>Modell-Rollen-Matrix</h2>
+        <p class="muted">Häkchen = diese Rolle erhält Zugriff auf das Modell.</p>
+        <div id="matrix-wrap" style="overflow-x:auto">
+          <table class="matrix" id="matrix-table"></table>
+        </div>
+        <p class="muted" id="matrix-empty" style="display:none">
+          Noch keine Modelle hochgeladen.
+        </p>
+      </div>
+
+      <!-- Delete -->
+      <div class="card">
+        <h2>KI-Modell löschen</h2>
+        <div class="field-row">
+          <label for="md-select">Modell</label>
+          <select id="md-select"></select>
+        </div>
+        <div class="btn-row">
+          <button class="danger" id="md-delete">Löschen</button>
+        </div>
+        <div class="notification" id="md-note"></div>
+      </div>
+
+    </section>
+  </main>
+
+  <script type="module" src="/static/js/app.js"></script>
+</body>
+</html>

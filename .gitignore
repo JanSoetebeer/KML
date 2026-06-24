@@ -3,3 +3,8 @@ logs
 state
 .venv
 output
+*.pyc
+__pycache__
+app.db
+Log.txt
+webscraper/SYS_AI_MODELS

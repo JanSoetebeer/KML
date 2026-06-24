@@ -132,8 +132,14 @@ def handler(event: dict, context) -> dict:
     job_id = event.get("job_id") or uuid.uuid4().hex
     log_level = event.get("log_level", os.getenv("LOG_LEVEL", "INFO"))
     max_jobs = str(event.get("max_jobs", os.getenv("MAX_CONCURRENT_JOBS", "10")))
+    file_types = event.get("file_types")  # list or comma-separated string
 
-    logger.info("Lambda invoked — job_id=%s  urls=%s", job_id, urls)
+    logger.info(
+        "Lambda invoked — job_id=%s  urls=%s  file_types=%s",
+        job_id,
+        urls,
+        file_types,
+    )
 
     cmd = [
         sys.executable,
@@ -144,6 +150,11 @@ def handler(event: dict, context) -> dict:
         "--log-level",
         log_level,
     ]
+
+    if file_types:
+        if isinstance(file_types, (list, tuple)):
+            file_types = ",".join(str(ft) for ft in file_types)
+        cmd += ["--file-types", str(file_types)]
 
     # Leave a safety margin so we can return a response before Lambda times out.
     timeout_s = 600.0

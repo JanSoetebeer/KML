@@ -71,12 +71,14 @@ class JobRunner:
         max_concurrent: int = 10,
         ping: bool = True,
         force: bool = False,
+        file_types=None,
     ):
         self._settings = settings
         self._store = visited_store
         self._max_concurrent = max(1, int(max_concurrent))
         self._ping = ping
         self._force = force
+        self._file_types = file_types
         self._runner = CrawlerRunner(settings)
         self._summary = BatchSummary()
 
@@ -152,7 +154,10 @@ class JobRunner:
         logger.info("[%s] START job — %s", job_id, validated)
         try:
             yield self._runner.crawl(
-                DocumentSpider, start_url=validated, job_id=job_id
+                DocumentSpider,
+                start_url=validated,
+                job_id=job_id,
+                file_types=self._file_types,
             )
             self._store.mark_visited(validated, job_id)
             logger.info("[%s] DONE job — %s", job_id, validated)

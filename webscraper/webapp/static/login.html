@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Anmeldung – Webscraper</title>
+  <link rel="stylesheet" href="/static/css/styles.css" />
+</head>
+<body>
+  <div class="login-wrapper">
+    <form class="login-card" id="login-form" autocomplete="off">
+      <h1>Anmeldung</h1>
+
+      <div class="field-row">
+        <label for="username">Benutzername</label>
+        <input type="text" id="username" name="username" required />
+      </div>
+
+      <div class="field-row">
+        <label for="password">Passwort</label>
+        <input type="password" id="password" name="password" required />
+      </div>
+
+      <div class="btn-row">
+        <button type="submit" id="login-btn">Anmelden</button>
+      </div>
+
+      <div class="notification error" id="notification"></div>
+    </form>
+  </div>
+
+  <script type="module" src="/static/js/login.js"></script>
+</body>
+</html>

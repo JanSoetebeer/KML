@@ -82,7 +82,21 @@ def parse_args(argv=None) -> argparse.Namespace:
         action="store_true",
         help="Skip the reachability probe during URL validation.",
     )
+    parser.add_argument(
+        "--file-types",
+        default=None,
+        help="Comma-separated file extensions to download (e.g. 'pdf,docx,png'). "
+        "Defaults to the spider's built-in set if omitted.",
+    )
     return parser.parse_args(argv)
+
+
+def _parse_file_types(value) -> list[str] | None:
+    """Turn a comma-separated string into a list of extensions, or None."""
+    if not value:
+        return None
+    parts = [p.strip() for p in str(value).split(",") if p.strip()]
+    return parts or None
 
 
 def _collect_urls(args: argparse.Namespace) -> list[str]:
@@ -111,6 +125,7 @@ def run_batch(
     ping: bool = True,
     force: bool = False,
     batch_id: str | None = None,
+    file_types=None,
 ) -> int:
     """
     Run a batch of URLs as concurrent jobs.
@@ -148,6 +163,7 @@ def run_batch(
         max_concurrent=max_jobs,
         ping=ping,
         force=force,
+        file_types=file_types,
     )
     summary = runner.run(jobs)
 
@@ -156,7 +172,13 @@ def run_batch(
     return 2 if counts.get("error", 0) else 0
 
 
-def run(url: str, job_id: str, log_level: str = "INFO", ping: bool = True) -> int:
+def run(
+    url: str,
+    job_id: str,
+    log_level: str = "INFO",
+    ping: bool = True,
+    file_types=None,
+) -> int:
     """
     Single-URL entry point (used by the AWS Lambda handler).
 
@@ -169,6 +191,7 @@ def run(url: str, job_id: str, log_level: str = "INFO", ping: bool = True) -> in
         max_jobs=1,
         ping=ping,
         batch_id=job_id,
+        file_types=file_types,
     )
 
 
@@ -181,6 +204,7 @@ def main(argv=None) -> None:
         max_jobs=args.max_jobs,
         ping=not args.no_ping,
         force=args.force,
+        file_types=_parse_file_types(args.file_types),
     )
     sys.exit(exit_code)
 
