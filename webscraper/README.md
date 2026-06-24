@@ -124,7 +124,10 @@ python run.py [urls ...] [--urls-file FILE] [--max-jobs N] [--force] [--log-leve
 | `DOWNLOAD_DELAY` | `1` | Seconds between requests (ethical scraping) |
 | `CONCURRENT_REQUESTS` | `4` | Parallel requests *within* one crawl |
 | `MAX_CONCURRENT_JOBS` | `10` | Max URL jobs running concurrently |
-| `VISITED_STORE_PATH` | `state/visited.json` | Persistent scraped-URL registry |
+| `VISITED_STORE_BACKEND` | `json` | Dedup backend: `json` (local) or `dynamodb` (cloud) |
+| `VISITED_STORE_PATH` | `state/visited.json` | JSON backend file path |
+| `DYNAMODB_TABLE` | `webscraper-visited` | DynamoDB backend table name |
+| `LOG_DIR` | `logs/` | Log output directory (set `/tmp/logs` on Lambda) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
 
 ---
@@ -193,13 +196,18 @@ webscraper/
 
 - **Per-URL jobs:** `JobRunner` launches one `DocumentSpider` per URL and caps simultaneous jobs at `--max-jobs` (default 10) via a Twisted `DeferredSemaphore`. Locally this is N concurrent spiders in one process; in production the same semantics map to N concurrent Lambda invocations (one job per URL).
 - **Within a crawl:** Scrapy's built-in `RFPDupeFilter` prevents fetching the same request twice.
-- **Across runs:** the `VisitedStore` (`state/visited.json`) records every successfully scraped URL. Re-running skips them unless `--force` is passed. Swap `JsonVisitedStore` for a DynamoDB/SQL implementation by subclassing `BaseVisitedStore` — no other code changes needed.
+- **Across runs:** the `VisitedStore` records every successfully scraped URL; re-running skips them unless `--force` is passed. Two backends ship today, selected via `VISITED_STORE_BACKEND`: `JsonVisitedStore` (local file, default) and `DynamoDBVisitedStore` (shared, for Lambda/cloud). Add another (SQL, Redis, ...) by subclassing `BaseVisitedStore` — no other code changes needed.
 
 ---
 
 ## AWS Lambda deployment
 
-See `lambda_handler.py` for the full deployment checklist and expected event payload.
+See **[`DEPLOY_AWS.md`](DEPLOY_AWS.md)** for the complete step-by-step guide
+(S3 bucket, IAM role, ECR, container image, env vars, triggers). The handler in
+`lambda_handler.py` runs each scrape in a subprocess to avoid Twisted's
+reactor-restart limitation on warm Lambda containers.
+
+Expected event payload:
 
 ```json
 {

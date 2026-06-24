@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+.git/
+.gitignore
+logs/
+output/
+state/
+httpcache/
+.env
+*.md
+aws/

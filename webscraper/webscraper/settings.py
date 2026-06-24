@@ -77,7 +77,10 @@ S3_BUCKET = os.getenv("S3_BUCKET", "")
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "10"))
 
 # Persistent registry of already-scraped URLs (loop / re-scrape guard).
+# Backend: "json" (local file, default) or "dynamodb" (shared, for Lambda/cloud).
+VISITED_STORE_BACKEND = os.getenv("VISITED_STORE_BACKEND", "json")
 VISITED_STORE_PATH = os.getenv("VISITED_STORE_PATH", "state/visited.json")
+DYNAMODB_TABLE = os.getenv("DYNAMODB_TABLE", "webscraper-visited")
 
 # ---------------------------------------------------------------------------
 # Item pipelines

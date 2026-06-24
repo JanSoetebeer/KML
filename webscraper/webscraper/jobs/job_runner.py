@@ -106,16 +106,24 @@ class JobRunner:
 
         sem = defer.DeferredSemaphore(self._max_concurrent)
 
-        @defer.inlineCallbacks
-        def _orchestrate():
-            deferreds = []
-            for url, job_id in jobs:
-                deferreds.append(sem.run(self._run_one, url, job_id))
-            yield defer.DeferredList(deferreds)
-            reactor.stop()
+        def _stop(_result=None):
+            """Always stop the reactor exactly once, however we got here."""
+            if reactor.running:
+                reactor.stop()
 
-        _orchestrate()
-        reactor.run()  # blocks until reactor.stop()
+        try:
+            deferreds = [
+                sem.run(self._run_one, url, job_id) for url, job_id in jobs
+            ]
+            # consumeErrors=True prevents 'Unhandled error in Deferred' noise;
+            # addBoth guarantees _stop runs on success OR failure so the
+            # process can never hang waiting on the reactor.
+            batch = defer.DeferredList(deferreds, consumeErrors=True)
+            batch.addBoth(_stop)
+            reactor.run()  # blocks until _stop() fires
+        except Exception:  # noqa: BLE001 — last-resort guard against a hang
+            logger.exception("Batch orchestration failed; forcing reactor stop.")
+            _stop()
 
         logger.info("Batch finished — %s", self._summary.counts())
         return self._summary

@@ -3,7 +3,10 @@ import os
 from datetime import datetime
 from pathlib import Path
 
-_LOG_DIR = Path(__file__).resolve().parents[2] / "logs"
+# Log directory is overridable via the LOG_DIR env var. This matters on AWS
+# Lambda, where the project directory is read-only and only /tmp is writable
+# (e.g. set LOG_DIR=/tmp/logs in the Lambda environment).
+_LOG_DIR = Path(os.getenv("LOG_DIR", str(Path(__file__).resolve().parents[2] / "logs")))
 _FMT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 _DATE_FMT = "%Y-%m-%d %H:%M:%S"
 

@@ -42,7 +42,7 @@ os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "webscraper.settings")
 from scrapy.utils.project import get_project_settings
 
 from webscraper.jobs.job_runner import JobRunner
-from webscraper.state.visited_store import JsonVisitedStore
+from webscraper.state.visited_store import build_visited_store
 from webscraper.utils.logging_config import configure as configure_logging
 
 
@@ -137,7 +137,7 @@ def run_batch(
     if max_jobs is None:
         max_jobs = settings.getint("MAX_CONCURRENT_JOBS", 10)
 
-    store = JsonVisitedStore(settings.get("VISITED_STORE_PATH", "state/visited.json"))
+    store = build_visited_store(settings)
 
     # One job_id per URL
     jobs = [(url, uuid.uuid4().hex) for url in urls]

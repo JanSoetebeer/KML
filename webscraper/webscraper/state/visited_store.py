@@ -128,3 +128,91 @@ class JsonVisitedStore(BaseVisitedStore):
     def all_visited(self) -> dict:
         with self._lock:
             return dict(self._data)
+
+
+class DynamoDBVisitedStore(BaseVisitedStore):
+    """
+    DynamoDB-backed implementation of :class:`BaseVisitedStore`.
+
+    Intended for AWS Lambda / multi-instance deployments where a local JSON
+    file cannot be shared between invocations. Each scraped URL is one item
+    keyed by the normalised URL.
+
+    Table schema
+    ------------
+    - Partition key: ``url`` (String) \u2014 the normalised URL.
+    - Attributes: ``job_id`` (String), ``scraped_at`` (String, ISO-8601),
+      ``metadata`` (Map).
+
+    Credentials / region are resolved by boto3 from the environment or the
+    Lambda execution role \u2014 nothing is hardcoded here.
+    """
+
+    def __init__(self, table_name: str, region_name: str | None = None):
+        if not table_name:
+            raise ValueError("DynamoDBVisitedStore requires a table_name.")
+        import boto3  # imported lazily so JSON-only runs don't need boto3
+
+        self._table_name = table_name
+        self._table = boto3.resource(
+            "dynamodb", region_name=region_name
+        ).Table(table_name)
+        logger.info(
+            "VisitedStore backend=dynamodb table=%s region=%s",
+            table_name,
+            region_name or "(default)",
+        )
+
+    def has_visited(self, url: str) -> bool:
+        key = normalize_url(url)
+        resp = self._table.get_item(Key={"url": key})
+        return "Item" in resp
+
+    def mark_visited(self, url: str, job_id: str, metadata: dict | None = None) -> None:
+        key = normalize_url(url)
+        self._table.put_item(
+            Item={
+                "url": key,
+                "job_id": job_id,
+                "scraped_at": datetime.now(timezone.utc).isoformat(),
+                "metadata": metadata or {},
+            }
+        )
+        logger.debug("Marked visited (dynamodb): %s (job_id=%s)", key, job_id)
+
+    def all_visited(self) -> dict:
+        # Full-table scan \u2014 use sparingly; fine for inspection/debugging.
+        items: dict = {}
+        scan_kwargs: dict = {}
+        while True:
+            resp = self._table.scan(**scan_kwargs)
+            for it in resp.get("Items", []):
+                url = it.pop("url")
+                items[url] = it
+            last_key = resp.get("LastEvaluatedKey")
+            if not last_key:
+                break
+            scan_kwargs["ExclusiveStartKey"] = last_key
+        return items
+
+
+def build_visited_store(settings) -> BaseVisitedStore:
+    """
+    Construct the visited store selected by configuration.
+
+    Reads from Scrapy ``settings`` (which already merge in environment vars):
+
+    - ``VISITED_STORE_BACKEND``: ``"json"`` (default) or ``"dynamodb"``.
+    - JSON backend \u2192 ``VISITED_STORE_PATH``.
+    - DynamoDB backend \u2192 ``DYNAMODB_TABLE`` (+ region from the AWS environment).
+    """
+    backend = (settings.get("VISITED_STORE_BACKEND") or "json").lower()
+    if backend == "dynamodb":
+        import os
+
+        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+        return DynamoDBVisitedStore(
+            table_name=settings.get("DYNAMODB_TABLE"),
+            region_name=region,
+        )
+    return JsonVisitedStore(settings.get("VISITED_STORE_PATH", "state/visited.json"))
