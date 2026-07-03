@@ -3,8 +3,13 @@ SQLite database layer for the admin web application.
 
 Holds the relational schema (positions, roles, users, the N:M user-roles join
 table, AI models and the model-roles matrix), connection helpers, and the
-initial seed data (admin / 0000 with the Administrator position and the
-Modulhandbuch role).
+initial seed data (a single administrator with the Administrator position and
+the Modulhandbuch role).
+
+The seed admin credentials are read from the ``ADMIN_USERNAME`` /
+``ADMIN_PASSWORD`` environment variables (defaults: ``admin`` / ``0000``) and
+the password is stored as a bcrypt hash. Changing these after the DB already
+exists has no effect — the seed only runs once (INSERT OR IGNORE).
 
 The database file lives at ``<project>/app.db`` and is created automatically on
 first start via :func:`init_db`.
@@ -94,19 +99,25 @@ def _seed(conn: sqlite3.Connection) -> None:
         "INSERT OR IGNORE INTO SYS_ROLES (bezeichnung) VALUES (?)", ("Modulhandbuch",)
     )
 
-    # Default admin user (admin / 0000) with the Administrator position
+    # Default admin user (from env, defaults admin / 0000) with Administrator
+    # position. The password is stored as a bcrypt hash.
+    from .auth import hash_password
+
+    admin_username = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
+    admin_password = os.getenv("ADMIN_PASSWORD", "0000")
+
     admin_pos_id = cur.execute(
         "SELECT id FROM SYS_POSITION WHERE bezeichnung = 'Administrator'"
     ).fetchone()["id"]
     cur.execute(
         "INSERT OR IGNORE INTO SYS_USER_DATA (username, password, position_id) "
         "VALUES (?, ?, ?)",
-        ("admin", "0000", admin_pos_id),
+        (admin_username, hash_password(admin_password), admin_pos_id),
     )
 
     # admin -> Modulhandbuch role
     admin_id = cur.execute(
-        "SELECT id FROM SYS_USER_DATA WHERE username = 'admin'"
+        "SELECT id FROM SYS_USER_DATA WHERE username = ?", (admin_username,)
     ).fetchone()["id"]
     mh_id = cur.execute(
         "SELECT id FROM SYS_ROLES WHERE bezeichnung = 'Modulhandbuch'"

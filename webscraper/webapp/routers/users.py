@@ -10,7 +10,13 @@ import sqlite3
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..auth import get_current_user, make_token, require_admin
+from ..auth import (
+    get_current_user,
+    hash_password,
+    make_token,
+    require_admin,
+    verify_password,
+)
 from ..db import get_connection
 
 router = APIRouter(prefix="/api/users", tags=["users"])
@@ -90,7 +96,7 @@ def create_user(req: CreateUserRequest, user: dict = Depends(get_current_user)):
             cur = conn.execute(
                 "INSERT INTO SYS_USER_DATA (username, password, position_id) "
                 "VALUES (?, ?, ?)",
-                (username, req.password, pos["id"]),
+                (username, hash_password(req.password), pos["id"]),
             )
         except sqlite3.IntegrityError:
             raise HTTPException(status_code=409, detail="Benutzername existiert bereits.")
@@ -194,14 +200,14 @@ def change_password(
         row = conn.execute(
             "SELECT password FROM SYS_USER_DATA WHERE id = ?", (user["id"],)
         ).fetchone()
-        if row is None or row["password"] != req.current:
+        if row is None or not verify_password(req.current, row["password"]):
             raise HTTPException(status_code=400, detail="Das aktuelle Passwort ist falsch.")
         conn.execute(
             "UPDATE SYS_USER_DATA SET password = ? WHERE id = ?",
-            (req.new, user["id"]),
+            (hash_password(req.new), user["id"]),
         )
         conn.commit()
     finally:
         conn.close()
 
-    return {"status": "ok", "token": make_token(user["username"], req.new)}
+    return {"status": "ok", "token": make_token(user["id"], user["username"])}

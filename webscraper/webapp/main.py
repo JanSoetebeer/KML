@@ -12,6 +12,9 @@ Serves:
 - ``/static`` -> CSS / JS assets
 """
 
+import logging
+import os
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -21,6 +24,16 @@ from fastapi.responses import FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 load_dotenv()
+
+# A signing key is required for session tokens. In production it MUST be set via
+# the environment so tokens survive restarts and can't be forged. For local dev
+# we fall back to an ephemeral random key (invalidates tokens on restart).
+if not os.getenv("SECRET_KEY"):
+    os.environ["SECRET_KEY"] = secrets.token_urlsafe(48)
+    logging.getLogger("webapp").warning(
+        "SECRET_KEY not set — generated an ephemeral one for this process. "
+        "Set SECRET_KEY in the environment for production deployments."
+    )
 
 from .db import init_db
 from .routers import auth as auth_router

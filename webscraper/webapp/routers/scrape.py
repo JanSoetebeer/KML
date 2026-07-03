@@ -29,7 +29,10 @@ from ..db import get_connection
 router = APIRouter(prefix="/api/scrape", tags=["scrape"])
 
 # Project root (scrape.py -> routers -> webapp -> project root) holds Log.txt.
-LOG_FILE = Path(__file__).resolve().parent.parent.parent / "Log.txt"
+# Overridable via LOG_FILE so it can live on a persistent volume in Docker.
+LOG_FILE = Path(
+    os.getenv("LOG_FILE", str(Path(__file__).resolve().parent.parent.parent / "Log.txt"))
+)
 
 RUN_MARKER = "===== SCRAPE RUN"
 
@@ -178,7 +181,7 @@ def _invoke_lambda(payload: dict) -> tuple[bool, str]:
 @router.post("")
 def start_scrape(
     file_types: str = Form(""),
-    model_id: int = Form(...),
+    model_id: int | None = Form(None),
     url: str = Form(""),
     file: UploadFile | None = File(None),
     user: dict = Depends(get_current_user),
@@ -194,24 +197,29 @@ def start_scrape(
             status_code=400, detail=f"Unbekannte Dateiformate: {', '.join(invalid)}."
         )
 
-    # --- AI model (must be one the user is allowed to use) ----------------
-    conn = get_connection()
-    try:
-        allowed = conn.execute(
-            "SELECT 1 FROM SYS_MODEL_ROLES mr "
-            "JOIN SYS_USER_ROLES ur ON ur.role_id = mr.role_id "
-            "WHERE mr.model_id = ? AND ur.user_id = ? LIMIT 1",
-            (model_id, user["id"]),
-        ).fetchone()
-        model_row = conn.execute(
-            "SELECT bezeichnung FROM SYS_AI_MODEL WHERE id = ?", (model_id,)
-        ).fetchone()
-    finally:
-        conn.close()
-    if model_row is None or allowed is None:
-        raise HTTPException(
-            status_code=400, detail="Ungültiges oder nicht erlaubtes KI-Modell."
-        )
+    # --- AI model -------------------------------------------------------
+    # TEMPORARY: the model is optional until a real model has been trained. When
+    # one *is* selected it must still be one the user is allowed to use.
+    model_label = "(kein Modell – Testlauf)"
+    if model_id is not None:
+        conn = get_connection()
+        try:
+            allowed = conn.execute(
+                "SELECT 1 FROM SYS_MODEL_ROLES mr "
+                "JOIN SYS_USER_ROLES ur ON ur.role_id = mr.role_id "
+                "WHERE mr.model_id = ? AND ur.user_id = ? LIMIT 1",
+                (model_id, user["id"]),
+            ).fetchone()
+            model_row = conn.execute(
+                "SELECT bezeichnung FROM SYS_AI_MODEL WHERE id = ?", (model_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if model_row is None or allowed is None:
+            raise HTTPException(
+                status_code=400, detail="Ungültiges oder nicht erlaubtes KI-Modell."
+            )
+        model_label = model_row["bezeichnung"]
 
     # --- collect URLs (direct + uploaded CSV/HTML) ------------------------
     urls: list[str] = []
@@ -246,7 +254,7 @@ def start_scrape(
         [
             f"{RUN_MARKER} {now} | job={job_id} =====",
             f"Benutzer: {user['username']} ({user['position']})",
-            f"KI-Modell: {model_row['bezeichnung']}",
+            f"KI-Modell: {model_label}",
             f"Dateiformate: {', '.join(selected)}",
             f"URLs ({len(urls)}): {', '.join(urls)}",
             "Starte Scrape via AWS Lambda…",

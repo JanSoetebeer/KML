@@ -204,7 +204,7 @@ aws lambda invoke `
   --function-name $FUNC `
   --region $REGION `
   --cli-binary-format raw-in-base64-out `
-  --payload '{\"url\": \"https://www.w3.org/TR/\"}' `
+  --payload '{\"url\": \"https://www.tum.de/studium/studienangebot/detail/informatik-bachelor-of-science-bsc\"}' `
   response.json
 
 Get-Content response.json

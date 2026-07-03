@@ -71,8 +71,9 @@ function updateButtonState() {
 
   const reasons = [];
   if (selectedFileTypes().length === 0) reasons.push("mind. 1 Dateiformat");
-  if (!model) reasons.push("KI-Modell");
+  // KI-Modell ist vorerst optional (bis ein Modell trainiert wurde).
   if (!hasSource()) reasons.push("URL oder Datei");
+  void model;
 
   btn.disabled = reasons.length > 0;
   hint.textContent = reasons.length ? "Fehlt: " + reasons.join(", ") : "";
@@ -96,7 +97,8 @@ function setupStart() {
     try {
       const fd = new FormData();
       fd.append("file_types", selectedFileTypes().join(","));
-      fd.append("model_id", document.getElementById("sc-model").value);
+      const modelId = document.getElementById("sc-model").value;
+      if (modelId) fd.append("model_id", modelId); // optional bis Modell existiert
       fd.append("url", document.getElementById("sc-url").value.trim());
       const fileInput = document.getElementById("sc-file");
       if (fileInput.files.length) fd.append("file", fileInput.files[0]);

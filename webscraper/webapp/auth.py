@@ -1,38 +1,64 @@
 """
 Authentication helpers.
 
-Per the project decision, this uses a deliberately simple, *plaintext* scheme:
-- Passwords are stored in plaintext in SYS_USER_DATA.
-- The login token is a base64-encoded JSON of the credentials, stored in the
-  browser's localStorage. On revisiting the login page the token is validated
-  and the user is redirected straight to the application.
+Security model (hardened for public/multi-user deployment):
+- Passwords are stored as **bcrypt hashes** in SYS_USER_DATA (never plaintext).
+- The login token is an **opaque, signed session token** (itsdangerous) that
+  carries only the user id + username and an issue timestamp. It does NOT
+  contain the password and cannot be forged without the server ``SECRET_KEY``.
+  Tokens expire after ``SESSION_MAX_AGE_SECONDS`` (default 12h).
 
-NOTE: This is insecure (credentials are recoverable from the token) and is only
-acceptable for a prototype / learning project. Swap `make_token`/`decode_token`
-for signed JWTs + bcrypt hashing to harden later.
+The token is stored in the browser's localStorage; on revisiting the login page
+it is validated and the user is redirected straight to the application.
 """
 
-import base64
-import binascii
-import json
+import os
 import sqlite3
 
+import bcrypt
 from fastapi import Header, HTTPException
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+
+_SECRET_KEY = os.getenv("SECRET_KEY", "")
+_TOKEN_SALT = "webapp-session-v1"
+_TOKEN_MAX_AGE = int(os.getenv("SESSION_MAX_AGE_SECONDS", str(12 * 3600)))
 
 
-def make_token(username: str, password: str) -> str:
-    """Encode credentials into an opaque (base64) token string."""
-    raw = json.dumps({"u": username, "p": password}).encode("utf-8")
-    return base64.urlsafe_b64encode(raw).decode("ascii")
+def _serializer() -> URLSafeTimedSerializer:
+    """Return the signing serializer; fails loudly if SECRET_KEY is unset."""
+    if not _SECRET_KEY:
+        raise RuntimeError(
+            "SECRET_KEY environment variable is not set. Refusing to issue "
+            "session tokens with an empty signing key."
+        )
+    return URLSafeTimedSerializer(_SECRET_KEY, salt=_TOKEN_SALT)
 
 
-def decode_token(token: str) -> tuple[str, str]:
-    """Decode a token back into ``(username, password)``; raises on bad input."""
+def hash_password(password: str) -> str:
+    """Return a bcrypt hash of *password* (safe to store)."""
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("ascii")
+
+
+def verify_password(password: str, hashed: str) -> bool:
+    """Return True if *password* matches the stored bcrypt *hashed* value."""
     try:
-        data = json.loads(base64.urlsafe_b64decode(token.encode("ascii")))
-        return data["u"], data["p"]
-    except (binascii.Error, ValueError, KeyError, UnicodeDecodeError) as exc:
-        raise ValueError("Malformed token") from exc
+        return bcrypt.checkpw(password.encode("utf-8"), hashed.encode("ascii"))
+    except (ValueError, TypeError):
+        return False
+
+
+def make_token(user_id: int, username: str) -> str:
+    """Create a signed, timestamped session token (no password inside)."""
+    return _serializer().dumps({"uid": int(user_id), "u": username})
+
+
+def decode_token(token: str) -> dict:
+    """Verify + decode a session token into ``{'uid', 'u'}``; raises on failure."""
+    try:
+        data = _serializer().loads(token, max_age=_TOKEN_MAX_AGE)
+        return {"uid": int(data["uid"]), "u": data["u"]}
+    except (BadSignature, SignatureExpired, KeyError, ValueError, TypeError) as exc:
+        raise ValueError("Malformed or expired token") from exc
 
 
 def authenticate(conn: sqlite3.Connection, username: str, password: str) -> dict | None:
@@ -42,7 +68,26 @@ def authenticate(conn: sqlite3.Connection, username: str, password: str) -> dict
         "WHERE username = ?",
         (username,),
     ).fetchone()
-    if row is None or row["password"] != password:
+    if row is None or not verify_password(password, row["password"]):
+        return None
+    return build_user_info(conn, row)
+
+
+def resolve_token_user(conn: sqlite3.Connection, token: str) -> dict | None:
+    """Resolve a session token to a user info dict, or ``None`` if invalid.
+
+    The token's embedded username must still match the stored one, so renaming
+    (or deleting) a user invalidates their existing tokens.
+    """
+    try:
+        data = decode_token(token)
+    except ValueError:
+        return None
+    row = conn.execute(
+        "SELECT id, username, position_id FROM SYS_USER_DATA WHERE id = ?",
+        (data["uid"],),
+    ).fetchone()
+    if row is None or row["username"] != data["u"]:
         return None
     return build_user_info(conn, row)
 
@@ -81,14 +126,10 @@ def get_current_user(x_auth_token: str | None = Header(default=None)) -> dict:
 
     if not x_auth_token:
         raise HTTPException(status_code=401, detail="Kein Token übergeben.")
-    try:
-        username, password = decode_token(x_auth_token)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Ungültiger Token.")
 
     conn = get_connection()
     try:
-        user = authenticate(conn, username, password)
+        user = resolve_token_user(conn, x_auth_token)
     finally:
         conn.close()
 

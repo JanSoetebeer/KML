@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from ..auth import authenticate, decode_token, get_current_user, make_token
+from ..auth import authenticate, get_current_user, make_token, resolve_token_user
 from ..db import get_connection
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -30,20 +30,15 @@ def login(req: LoginRequest):
     if user is None:
         raise HTTPException(status_code=401, detail="Ungültige Anmeldedaten.")
 
-    return {"token": make_token(req.username, req.password), "user": user}
+    return {"token": make_token(user["id"], user["username"]), "user": user}
 
 
 @router.post("/validate")
 def validate(req: TokenRequest):
     """Validate a stored token (used for auto-redirect on the login page)."""
-    try:
-        username, password = decode_token(req.token)
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Ungültiger Token.")
-
     conn = get_connection()
     try:
-        user = authenticate(conn, username, password)
+        user = resolve_token_user(conn, req.token)
     finally:
         conn.close()
 

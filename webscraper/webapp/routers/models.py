@@ -8,6 +8,7 @@ AI model endpoints (admin only).
   SYS_AI_MODEL row.
 """
 
+import os
 import shutil
 import sqlite3
 from pathlib import Path
@@ -21,7 +22,10 @@ from ..db import get_connection
 router = APIRouter(prefix="/api/models", tags=["models"])
 
 # <project>/SYS_AI_MODELS  (models.py -> routers -> webapp -> project root)
-MODELS_DIR = Path(__file__).resolve().parent.parent.parent / "SYS_AI_MODELS"
+# Overridable via MODELS_DIR so uploads can live on a persistent volume.
+MODELS_DIR = Path(
+    os.getenv("MODELS_DIR", str(Path(__file__).resolve().parent.parent.parent / "SYS_AI_MODELS"))
+)
 
 
 def _ensure_dir() -> None:
