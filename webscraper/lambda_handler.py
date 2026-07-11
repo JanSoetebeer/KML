@@ -185,24 +185,48 @@ def handler(event: dict, context) -> dict:
     if result.stderr:
         logger.warning("[%s] scraper stderr:\n%s", job_id, result.stderr)
 
+    summary = _extract_summary(result.stdout)
+
     code = result.returncode
     if code == _EXIT_OK:
         return {
             "statusCode": 200,
             "body": json.dumps(
-                {"job_id": job_id, "status": "completed", "urls": urls}
+                {"job_id": job_id, "status": "completed", "urls": urls,
+                 "summary": summary}
             ),
         }
     if code == _EXIT_NO_URLS_OR_INVALID:
         return {
             "statusCode": 422,
             "body": json.dumps(
-                {"job_id": job_id, "status": "no_urls_or_invalid", "urls": urls}
+                {"job_id": job_id, "status": "no_urls_or_invalid", "urls": urls,
+                 "summary": summary}
             ),
         }
     return {
         "statusCode": 500,
         "body": json.dumps(
-            {"job_id": job_id, "status": "job_error", "urls": urls, "exit_code": code}
+            {"job_id": job_id, "status": "job_error", "urls": urls,
+             "exit_code": code, "summary": summary}
         ),
     }
+
+
+# Must match run.py's SUMMARY_MARKER.
+_SUMMARY_MARKER = "__SCRAPE_SUMMARY__"
+
+
+def _extract_summary(stdout: str | None) -> dict | None:
+    """Pull the JSON run summary printed by run.py out of the subprocess stdout."""
+    if not stdout:
+        return None
+    for line in stdout.splitlines():
+        idx = line.find(_SUMMARY_MARKER)
+        if idx != -1:
+            payload = line[idx + len(_SUMMARY_MARKER):].strip()
+            try:
+                return json.loads(payload)
+            except (json.JSONDecodeError, ValueError):
+                return None
+    return None

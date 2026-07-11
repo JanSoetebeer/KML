@@ -88,12 +88,159 @@ async function loadLog() {
   log.scrollTop = log.scrollHeight; // show the latest lines
 }
 
+// ---------------------------------------------------------------------------
+// Progress + results dashboard
+// ---------------------------------------------------------------------------
+
+const STATUS_LABELS = {
+  scraped: "Erfolgreich",
+  skipped: "Übersprungen",
+  invalid: "Ungültig",
+  error: "Fehler",
+  pending: "Ausstehend",
+};
+
+function fmtBytes(n) {
+  const mb = (n || 0) / (1024 * 1024);
+  if (mb >= 1) return mb.toFixed(2) + " MB";
+  return ((n || 0) / 1024).toFixed(1) + " KB";
+}
+
+function showResultCard() {
+  document.getElementById("sc-result-card").style.display = "";
+}
+
+function renderProgress(job) {
+  const el = document.getElementById("sc-progress");
+  const results = document.getElementById("sc-results");
+  if (job.status === "running") {
+    results.innerHTML = "";
+    el.innerHTML =
+      `<div class="progress-wrap"><div class="progress-bar indeterminate"></div></div>` +
+      `<p class="muted">Scraping läuft … <strong>${job.elapsed_seconds}s</strong>` +
+      ` · ${job.urls.length} URL(s) · ${escapeHtml(job.file_types.join(", "))}</p>`;
+  } else {
+    el.innerHTML = "";
+  }
+}
+
+function tile(label, value) {
+  return (
+    `<div class="stat-tile"><div class="stat-value">${escapeHtml(String(value))}</div>` +
+    `<div class="stat-label">${escapeHtml(label)}</div></div>`
+  );
+}
+
+function bar(label, value, max, cls) {
+  const pct = max > 0 ? Math.round((value / max) * 100) : 0;
+  return (
+    `<div class="cmp-row"><span class="cmp-label">${escapeHtml(label)}</span>` +
+    `<span class="cmp-track"><span class="cmp-fill ${cls}" style="width:${pct}%"></span></span>` +
+    `<span class="cmp-num">${value}</span></div>`
+  );
+}
+
+function renderResults(job) {
+  const results = document.getElementById("sc-results");
+  const s = job.summary;
+
+  if (!s) {
+    const cls = job.status === "error" ? "err" : "muted";
+    results.innerHTML =
+      `<p class="${cls}">${escapeHtml(job.detail || "Keine Ergebnisdaten verfügbar.")}</p>`;
+    return;
+  }
+
+  // Summary tiles ----------------------------------------------------------
+  let html =
+    `<div class="stat-grid">` +
+    tile("URLs", s.total_urls) +
+    tile("Gefunden", s.files_found) +
+    tile("Heruntergeladen", s.files_downloaded) +
+    tile("Datenmenge", fmtBytes(s.bytes_downloaded)) +
+    tile("Dauer", (s.duration_seconds || 0) + " s") +
+    `</div>`;
+
+  // Found vs downloaded graphic -------------------------------------------
+  const max = Math.max(s.files_found, s.files_downloaded, 1);
+  html +=
+    `<div class="cmp-chart">` +
+    bar("Gefunden", s.files_found, max, "fill-found") +
+    bar("Heruntergeladen", s.files_downloaded, max, "fill-dl") +
+    `</div>`;
+
+  // Status badges ----------------------------------------------------------
+  const counts = s.counts || {};
+  const badges = Object.keys(counts)
+    .map(
+      (k) =>
+        `<span class="badge badge-${k}">${escapeHtml(STATUS_LABELS[k] || k)}: ${counts[k]}</span>`
+    )
+    .join(" ");
+  if (badges) html += `<div class="badge-row">${badges}</div>`;
+
+  // Per-URL table ----------------------------------------------------------
+  const rows = (s.per_url || [])
+    .map((r) => {
+      const detail = r.detail ? escapeHtml(r.detail) : "";
+      return (
+        `<tr><td class="url-cell" title="${escapeHtml(r.url)}">${escapeHtml(r.url)}</td>` +
+        `<td><span class="badge badge-${r.status}">${escapeHtml(
+          STATUS_LABELS[r.status] || r.status
+        )}</span></td>` +
+        `<td class="num">${r.files_found}</td>` +
+        `<td class="num">${r.files_downloaded}</td>` +
+        `<td class="num">${fmtBytes(r.bytes_downloaded)}</td>` +
+        `<td class="muted small">${detail}</td></tr>`
+      );
+    })
+    .join("");
+  if (rows) {
+    html +=
+      `<div class="table-scroll"><table class="result-table">` +
+      `<thead><tr><th>URL</th><th>Status</th><th>Gefunden</th>` +
+      `<th>Geladen</th><th>Größe</th><th>Detail</th></tr></thead>` +
+      `<tbody>${rows}</tbody></table></div>`;
+  }
+
+  results.innerHTML = html;
+}
+
+function pollStatus(jobId) {
+  return new Promise((resolve) => {
+    const tick = async () => {
+      let job;
+      try {
+        job = await api(`/api/scrape/status/${jobId}`);
+      } catch (err) {
+        document.getElementById("sc-results").innerHTML =
+          `<p class="err">${escapeHtml(err.detail || "Statusabfrage fehlgeschlagen.")}</p>`;
+        document.getElementById("sc-progress").innerHTML = "";
+        return resolve(false);
+      }
+      renderProgress(job);
+      if (job.status === "running") {
+        setTimeout(tick, 1500);
+        return;
+      }
+      renderResults(job);
+      resolve(job.status === "done");
+    };
+    tick();
+  });
+}
+
 function setupStart() {
   const btn = document.getElementById("sc-start");
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     const original = btn.textContent;
     btn.textContent = "Läuft…";
+    showResultCard();
+    document.getElementById("sc-progress").innerHTML =
+      `<div class="progress-wrap"><div class="progress-bar indeterminate"></div></div>` +
+      `<p class="muted">Job wird gestartet …</p>`;
+    document.getElementById("sc-results").innerHTML = "";
     try {
       const fd = new FormData();
       fd.append("file_types", selectedFileTypes().join(","));
@@ -103,9 +250,12 @@ function setupStart() {
       const fileInput = document.getElementById("sc-file");
       if (fileInput.files.length) fd.append("file", fileInput.files[0]);
 
-      await apiForm("/api/scrape", fd);
+      const started = await apiForm("/api/scrape", fd);
+      await pollStatus(started.job_id);
     } catch (err) {
-      alert(err.detail || "Scrape fehlgeschlagen.");
+      document.getElementById("sc-progress").innerHTML = "";
+      document.getElementById("sc-results").innerHTML =
+        `<p class="err">${escapeHtml(err.detail || "Scrape fehlgeschlagen.")}</p>`;
     } finally {
       btn.textContent = original;
       await loadLog();

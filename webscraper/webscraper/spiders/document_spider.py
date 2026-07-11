@@ -95,6 +95,7 @@ class DocumentSpider(BaseSpider):
         for absolute_url in candidates:
             if self._is_target_url(absolute_url):
                 found += 1
+                self.crawler.stats.inc_value("webscraper/files_found")
                 logger.debug("[%s] Queuing document: %s", self.job_id, absolute_url)
                 yield scrapy.Request(
                     url=absolute_url,
@@ -121,6 +122,8 @@ class DocumentSpider(BaseSpider):
             len(content),
             source_page,
         )
+        self.crawler.stats.inc_value("webscraper/files_downloaded")
+        self.crawler.stats.inc_value("webscraper/bytes_downloaded", len(content))
 
         yield DocumentItem(
             url=url,

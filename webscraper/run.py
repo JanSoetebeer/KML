@@ -27,6 +27,7 @@ Examples
 """
 
 import argparse
+import json
 import logging
 import os
 import sys
@@ -36,6 +37,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# Marker prefixing the JSON run summary printed to stdout (parsed by callers).
+SUMMARY_MARKER = "__SCRAPE_SUMMARY__"
 
 os.environ.setdefault("SCRAPY_SETTINGS_MODULE", "webscraper.settings")
 
@@ -169,6 +173,12 @@ def run_batch(
 
     counts = summary.counts()
     logger.info("=== webscraper batch finished  batch_id=%s  %s ===", batch_id, counts)
+
+    # Emit a machine-readable summary on stdout so callers (Lambda handler /
+    # webapp) can surface a results dashboard. The marker lets them locate this
+    # single line amongst the log output.
+    print(SUMMARY_MARKER + " " + json.dumps(summary.to_dict()), flush=True)
+
     return 2 if counts.get("error", 0) else 0
 
 

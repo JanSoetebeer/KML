@@ -216,3 +216,42 @@ Expected event payload:
   "log_level": "INFO"
 }
 ```
+
+---
+
+## Infrastructure as code (Terraform)
+
+The whole stack — EC2 web app (Docker Compose + Caddy), Elastic IP, security
+group, IAM instance role, S3 output bucket, DynamoDB visited-store, and an
+optional scraper Lambda — can be provisioned from **[`terraform/`](terraform/)**
+instead of the manual steps in `DEPLOY_WEBAPP_EC2.md` / `DEPLOY_AWS.md`:
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars   # then edit
+export TF_VAR_admin_password='a-strong-password'
+terraform init && terraform apply
+terraform output webapp_url
+```
+
+See [`terraform/README.md`](terraform/README.md) for the full workflow,
+including how to add the Lambda (ECR image build/push).
+
+---
+
+## Web app: scrape progress & results
+
+The admin web app's Scraping tab starts each run as a **background job** and
+polls it, so the browser request returns immediately (slow image/media runs no
+longer time out). The API:
+
+| Endpoint | Purpose |
+|---|---|
+| `POST /api/scrape` | Start a run; returns `{ "job_id", "status": "running" }` |
+| `GET /api/scrape/status/{job_id}` | Live status → progress while running, then the full result `summary` (files found/downloaded, bytes, duration, per-URL breakdown) |
+| `GET /api/scrape/log` | Log lines of the most recent run |
+
+The run executes on AWS Lambda when `LAMBDA_FUNCTION_NAME` is set, otherwise via
+a local `run.py` subprocess (dev/demo). Set `SCRAPE_PING=false` to skip the
+pre-crawl HEAD probe in networks where it false-negatives (e.g. SSL-intercepting
+proxies).

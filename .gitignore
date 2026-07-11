@@ -8,3 +8,17 @@ __pycache__
 app.db
 Log.txt
 webscraper/SYS_AI_MODELS
+
+# Private keys / credentials — never commit
+*.pem
+*.key
+
+# Stray local artifacts
+response.json
+
+# Terraform (state can contain secrets; plugins are large)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

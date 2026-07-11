@@ -43,6 +43,29 @@ AUTOTHROTTLE_MAX_DELAY = 10.0
 AUTOTHROTTLE_TARGET_CONCURRENCY = 1.0
 
 # ---------------------------------------------------------------------------
+# Download safety limits
+#
+# Without these, media-heavy pages (many images, or large/streaming videos)
+# can stall a run until the Lambda subprocess is killed — which looks like a
+# hang/"endless loop". Each is env-overridable.
+# ---------------------------------------------------------------------------
+
+# Abort a single request that takes too long (default Scrapy value is 180s).
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", "60"))
+
+# Hard cap on a single file's size (bytes). Files larger than this are dropped
+# instead of being buffered fully into memory. Default 50 MB.
+DOWNLOAD_MAXSIZE = int(os.getenv("DOWNLOAD_MAXSIZE", str(50 * 1024 * 1024)))
+DOWNLOAD_WARNSIZE = int(os.getenv("DOWNLOAD_WARNSIZE", str(20 * 1024 * 1024)))
+
+# Don't multiply slow requests with many retries.
+RETRY_TIMES = int(os.getenv("RETRY_TIMES", "1"))
+
+# Safety cap: stop the crawl after this many downloaded files per run so a
+# link-heavy page can't run indefinitely. 0 disables the cap.
+CLOSESPIDER_ITEMCOUNT = int(os.getenv("MAX_ITEMS_PER_RUN", "200"))
+
+# ---------------------------------------------------------------------------
 # HTTP cache (speeds up re-runs during development; disable in production)
 # ---------------------------------------------------------------------------
 

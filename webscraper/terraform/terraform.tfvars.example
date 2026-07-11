@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars and fill in. `terraform.tfvars` is git-ignored.
+
+aws_region   = "eu-central-1"
+project_name = "webscraper"
+
+# --- EC2 access -------------------------------------------------------------
+# Your public SSH key (contents of e.g. ~/.ssh/id_ed25519.pub).
+ssh_public_key = "ssh-ed25519 AAAA... you@host"
+# Lock SSH to your current IP. Find it with:  curl https://checkip.amazonaws.com
+ssh_ingress_cidr = "203.0.113.7/32"
+
+# --- App seed admin (applied only on first DB creation) ---------------------
+admin_username = "admin"
+# Prefer passing this via the environment instead of committing it:
+#   export TF_VAR_admin_password='...'
+admin_password = "change-me-strong"
+
+# --- Where the instance pulls the code from ---------------------------------
+repo_url    = "https://github.com/<you>/<repo>.git"
+repo_branch = "main"
+repo_subdir = "webscraper"
+
+# --- Storage / dedup --------------------------------------------------------
+create_s3_bucket      = true
+s3_enabled            = true
+create_dynamodb_table = true
+
+# --- Optional: provision the scraper Lambda ---------------------------------
+# Leave false to deploy only the EC2 web app. To add the Lambda, see README.md.
+enable_lambda    = false
+# lambda_image_uri = "660941536751.dkr.ecr.eu-central-1.amazonaws.com/webscraper:latest"
