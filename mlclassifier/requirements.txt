@@ -1,0 +1,10 @@
+# Modulhandbuch classifier — training + inference dependencies.
+# Kept separate from the webscraper's requirements so the two can be installed
+# independently. Install into the repo-root .venv:
+#   .venv/Scripts/python -m pip install -r mlclassifier/requirements.txt
+scikit-learn>=1.5,<2.0
+numpy>=1.26
+scipy>=1.11
+pandas>=2.0
+joblib>=1.3
+PyMuPDF>=1.24        # PDF text extraction (imported as 'fitz')
