@@ -16,6 +16,13 @@ webscraper/SYS_AI_MODELS
 # Stray local artifacts
 response.json
 
+# ML classifier: training data (large) + regenerable artifacts.
+# The trained model belongs in S3 or is reproduced via `python -m mlclassifier train`.
+# training_report.json is kept (small, useful to diff across runs).
+modulhandbuecher/
+mlclassifier/artifacts/*.joblib
+mlclassifier/artifacts/*.jsonl
+
 # Terraform (state can contain secrets; plugins are large)
 .terraform/
 *.tfstate
