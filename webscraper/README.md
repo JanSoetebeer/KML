@@ -129,6 +129,49 @@ python run.py [urls ...] [--urls-file FILE] [--max-jobs N] [--force] [--log-leve
 | `DYNAMODB_TABLE` | `webscraper-visited` | DynamoDB backend table name |
 | `LOG_DIR` | `logs/` | Log output directory (set `/tmp/logs` on Lambda) |
 | `LOG_LEVEL` | `INFO` | Logging verbosity |
+| `CLASSIFIER_ENABLED` | `false` | Score each download with the Modulhandbuch model |
+| `MODEL_PATH` | — | Trained model path (empty → mlclassifier default) |
+
+---
+
+## Document classification (Modulhandbuch model)
+
+With `CLASSIFIER_ENABLED=true`, a `ClassificationPipeline` runs after local
+storage and scores every downloaded document with the trained
+[`mlclassifier`](../mlclassifier/README.md) model — reusing the same package, so
+there is one source of truth for extraction + the model. For each document it:
+
+- annotates the item with `{score, decision}` (`automatic_positive` /
+  `needs_review` / `automatic_negative`), and
+- appends a line to a per-crawl **review manifest**:
+  `output/_review/manifest_<job_id>.jsonl`.
+
+It loads the model **once per process** (shared across concurrent jobs) and
+**degrades to a no-op** — the crawl runs unchanged — if the model file or the ML
+dependencies are missing.
+
+### Scrape → train feedback loop
+
+The manifest is the bridge back to training (active learning): review the
+uncertain band, then fold confirmed documents into the labelled set and retrain.
+
+```bash
+# 1. Crawl with classification on
+CLASSIFIER_ENABLED=true python run.py https://some-university.de/studium
+
+# 2. Ingest reviewed positives/negatives (grouped by hostname automatically)
+python -m mlclassifier ingest --manifest output/_review/manifest_<job_id>.jsonl \
+    --label positiv --decision needs_review
+#   ...or ad-hoc files/dirs:
+python -m mlclassifier ingest output/some-host/<job_id>/ --label negativ
+
+# 3. Retrain on the grown dataset
+python -m mlclassifier train
+```
+
+> Scoring runs inline on the crawl thread; a very large PDF briefly blocks other
+> jobs in the same process. Moving extraction to a thread pool is a future
+> optimisation.
 
 ---
 

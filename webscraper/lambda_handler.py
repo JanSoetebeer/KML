@@ -149,6 +149,8 @@ def handler(event: dict, context) -> dict:
         max_jobs,
         "--log-level",
         log_level,
+        "--batch-id",
+        job_id,
     ]
 
     if file_types:

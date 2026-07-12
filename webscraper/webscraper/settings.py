@@ -65,6 +65,15 @@ RETRY_TIMES = int(os.getenv("RETRY_TIMES", "1"))
 # link-heavy page can't run indefinitely. 0 disables the cap.
 CLOSESPIDER_ITEMCOUNT = int(os.getenv("MAX_ITEMS_PER_RUN", "200"))
 
+# Bounded deep crawl (DocumentSpider follows same-site links to find documents
+# that aren't linked from the seed page). Keep these small to stay polite and
+# bounded — a university site can be enormous.
+CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
+CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "60"))
+
+# Backstop: also stop a crawl after this many fetched pages (Scrapy built-in).
+CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
+
 # ---------------------------------------------------------------------------
 # HTTP cache (speeds up re-runs during development; disable in production)
 # ---------------------------------------------------------------------------
@@ -91,6 +100,21 @@ LOG_ENABLED = True
 LOCAL_ENABLED = os.getenv("LOCAL_ENABLED", "true").lower() == "true"
 S3_ENABLED = os.getenv("S3_ENABLED", "false").lower() == "true"
 S3_BUCKET = os.getenv("S3_BUCKET", "")
+
+# ---------------------------------------------------------------------------
+# ML classification (Modulhandbuch classifier)
+#
+# When enabled, each downloaded document is scored by the trained model and the
+# verdict is written to a per-crawl review manifest (output/_review/). Disabled
+# by default and degrades to a no-op if the model or ML deps aren't present.
+# ---------------------------------------------------------------------------
+
+CLASSIFIER_ENABLED = os.getenv("CLASSIFIER_ENABLED", "false").lower() == "true"
+# Path to the trained joblib artifact. Empty → mlclassifier's default location.
+MODEL_PATH = os.getenv("MODEL_PATH", "")
+# Where per-run classification review manifests are written. Must be writable —
+# on Lambda only /tmp is (set REVIEW_MANIFEST_DIR=/tmp/review there).
+REVIEW_MANIFEST_DIR = os.getenv("REVIEW_MANIFEST_DIR", "")
 
 # ---------------------------------------------------------------------------
 # Job orchestration
@@ -122,6 +146,12 @@ if LOCAL_ENABLED:
     ITEM_PIPELINES[
         "webscraper.pipelines.local_storage_pipeline.LocalStoragePipeline"
     ] = 200
+
+if CLASSIFIER_ENABLED:
+    # After local storage (200) so the saved file path is known, around S3 (300).
+    ITEM_PIPELINES[
+        "webscraper.pipelines.classification_pipeline.ClassificationPipeline"
+    ] = 250
 
 if S3_ENABLED:
     ITEM_PIPELINES[

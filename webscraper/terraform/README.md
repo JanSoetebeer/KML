@@ -67,11 +67,12 @@ terraform apply -var="enable_lambda=true"
 REPO=$(terraform output -raw ecr_repository_url)
 REGION=eu-central-1   # your configured aws_region
 
-# 2. Build & push the image (from webscraper/, which holds the Lambda Dockerfile).
-cd ..
+# 2. Build & push the image. NOTE: build from the REPO ROOT so the bundled
+#    mlclassifier package + trained model (outside webscraper/) are in context.
+cd ../..                       # repo root (terraform/ -> webscraper/ -> root)
 aws ecr get-login-password --region "$REGION" \
   | docker login --username AWS --password-stdin "${REPO%/*}"
-docker build -t "$REPO:latest" .
+docker build --platform linux/amd64 -f webscraper/Dockerfile -t "$REPO:latest" .
 docker push "$REPO:latest"
 
 # 3. Create the function pointing at the pushed image.

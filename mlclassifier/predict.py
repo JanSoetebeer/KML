@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from . import config
-from .extraction import STATUS_OK, extract_document
+from .extraction import STATUS_OK, extract_document, extract_document_bytes
 from .features import records_to_frame
 from .pipeline import load_model
 
@@ -57,6 +57,10 @@ class Classifier:
         """Extract *path* and classify it end to end."""
         return self.classify_record(extract_document(path))
 
+    def classify_bytes(self, content: bytes, filename: str) -> dict:
+        """Extract in-memory *content* and classify it (used by the scraper)."""
+        return self.classify_record(extract_document_bytes(content, filename))
+
     # -- output shaping --------------------------------------------------------
 
     def _result(self, doc: dict, score: float | None, decision: str) -> dict:
@@ -78,3 +82,22 @@ def load_classifier(path: str | Path = config.DEFAULT_MODEL_PATH) -> Classifier:
     """Load a trained artifact into a ready-to-use :class:`Classifier`."""
     estimator, metadata = load_model(path)
     return Classifier(estimator, metadata)
+
+
+_SHARED: dict[str, Classifier] = {}
+
+
+def get_shared_classifier(path: str | Path = config.DEFAULT_MODEL_PATH) -> Classifier:
+    """
+    Return a process-wide cached classifier for *path*.
+
+    The scraper runs many crawl jobs in one process; loading the model once and
+    sharing it avoids re-reading the artifact per job. The estimator is only used
+    for read-only ``predict_proba`` calls, so sharing it is safe.
+    """
+    key = str(Path(path).resolve())
+    clf = _SHARED.get(key)
+    if clf is None:
+        clf = load_classifier(path)
+        _SHARED[key] = clf
+    return clf

@@ -48,6 +48,20 @@ def _cmd_train(args) -> int:
     return 0
 
 
+def _cmd_ingest(args) -> int:
+    from .ingest import ingest_from_manifest, ingest_paths
+    if args.manifest:
+        decisions = set(args.decision) if args.decision else None
+        n = ingest_from_manifest(
+            args.manifest, args.label, data_dir=args.data_dir, decisions=decisions,
+        )
+    else:
+        n = ingest_paths(args.paths, args.label, data_dir=args.data_dir, group=args.group)
+    print(f"ingested {n} file(s) into {args.data_dir} as '{args.label}'. "
+          f"Retrain with: python -m mlclassifier train")
+    return 0
+
+
 def _cmd_predict(args) -> int:
     from .predict import load_classifier
     clf = load_classifier(args.model)
@@ -80,6 +94,21 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Force which variant is shipped (default: auto by PR-AUC).")
     p_train.add_argument("--force", action="store_true", help="Ignore cache; re-extract.")
     p_train.set_defaults(func=_cmd_train)
+
+    p_ing = sub.add_parser(
+        "ingest", help="Add reviewed scraped files to the training set.")
+    p_ing.add_argument("paths", nargs="*", help="PDF file(s) or dir(s) to ingest.")
+    p_ing.add_argument("--label", required=True,
+                      help="Label for the ingested files: positiv | negativ.")
+    p_ing.add_argument("--manifest", default=None,
+                      help="Ingest files listed in a crawl review manifest (JSONL).")
+    p_ing.add_argument("--decision", action="append", default=None,
+                      help="With --manifest: only ingest this model decision "
+                           "(repeatable, e.g. --decision needs_review).")
+    p_ing.add_argument("--group", default=None,
+                      help="Override the university/domain group (else parent folder).")
+    p_ing.add_argument("--data-dir", default=str(config.DEFAULT_DATA_DIR))
+    p_ing.set_defaults(func=_cmd_ingest)
 
     p_pred = sub.add_parser("predict", help="Classify one or more files.")
     p_pred.add_argument("paths", nargs="+", help="PDF file(s) to classify.")

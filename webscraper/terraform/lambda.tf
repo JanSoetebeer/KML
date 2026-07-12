@@ -42,6 +42,12 @@ resource "aws_lambda_function" "scraper" {
       VISITED_STORE_BACKEND = var.create_dynamodb_table ? "dynamodb" : "json"
       VISITED_STORE_PATH    = "/tmp/visited.json"
       DYNAMODB_TABLE        = var.dynamodb_table_name
+
+      # Modulhandbuch classifier: score each download and publish the review
+      # manifest to s3://<bucket>/manifests/<job_id>.jsonl for the web app.
+      # The model is bundled in the image; only /tmp is writable on Lambda.
+      CLASSIFIER_ENABLED  = "true"
+      REVIEW_MANIFEST_DIR = "/tmp/review"
     }
   }
 

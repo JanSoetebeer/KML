@@ -12,8 +12,11 @@ WORKDIR /app
 COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 2. Copy application code (webapp package + shared modules used by the API).
+# 2. Copy application code (webapp package + the webscraper package, whose
+#    utils.url_sources the scrape API imports for CSV/HTML URL extraction).
 COPY webapp/ ./webapp/
+COPY webscraper/ ./webscraper/
+COPY scrapy.cfg ./
 
 # 3. Persistent data (SQLite DB, uploaded models, Log.txt) lives under /data,
 #    mounted as a volume by docker-compose.

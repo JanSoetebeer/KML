@@ -62,23 +62,15 @@ def _truncate(text: str) -> str:
     return text
 
 
-def extract_pdf(path: Path) -> dict:
-    """Extract text + basic structure from a PDF using PyMuPDF (fitz)."""
-    import fitz  # imported lazily so the package imports without PyMuPDF
-
-    try:
-        doc = fitz.open(path)
-    except Exception as exc:  # noqa: BLE001 — any parse error → status, not crash
-        logger.warning("PDF open failed for %s: %s", path.name, exc)
-        return _empty_record(path, STATUS_FAILED)
-
+def _record_from_pdf_doc(doc, filename: str) -> dict:
+    """Build the unified record from an already-open PyMuPDF document."""
     try:
         parts = []
         for page in doc:
             try:
                 parts.append(page.get_text())
             except Exception as exc:  # noqa: BLE001 — skip a bad page, keep the rest
-                logger.debug("page extract failed in %s: %s", path.name, exc)
+                logger.debug("page extract failed in %s: %s", filename, exc)
         text = "\n".join(parts)
         page_count = doc.page_count
         title = (doc.metadata or {}).get("title") or ""
@@ -89,7 +81,7 @@ def extract_pdf(path: Path) -> dict:
     status = STATUS_OK if text_length >= config.MIN_TEXT_CHARS else STATUS_EMPTY
 
     return {
-        "filename": path.name,
+        "filename": filename,
         "file_type": "pdf",
         "title": title.strip(),
         "text": _truncate(text),
@@ -100,9 +92,37 @@ def extract_pdf(path: Path) -> dict:
     }
 
 
-# Map file extension → extractor. Extend here as new types are supported.
+def extract_pdf(path: Path) -> dict:
+    """Extract text + basic structure from a PDF file using PyMuPDF (fitz)."""
+    import fitz  # imported lazily so the package imports without PyMuPDF
+
+    try:
+        doc = fitz.open(path)
+    except Exception as exc:  # noqa: BLE001 — any parse error → status, not crash
+        logger.warning("PDF open failed for %s: %s", path.name, exc)
+        return _empty_record(path, STATUS_FAILED)
+    return _record_from_pdf_doc(doc, path.name)
+
+
+def extract_pdf_bytes(content: bytes, filename: str) -> dict:
+    """Extract a PDF from an in-memory byte string (used by the scraper)."""
+    import fitz
+
+    try:
+        doc = fitz.open(stream=content, filetype="pdf")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("PDF open (bytes) failed for %s: %s", filename, exc)
+        return {**_empty_record(Path(filename), STATUS_FAILED), "file_type": "pdf"}
+    return _record_from_pdf_doc(doc, filename)
+
+
+# Map file extension → path extractor. Extend here as new types are supported.
 _EXTRACTORS = {
     ".pdf": extract_pdf,
+}
+# Map file extension → bytes extractor.
+_BYTES_EXTRACTORS = {
+    ".pdf": extract_pdf_bytes,
 }
 
 
@@ -123,3 +143,20 @@ def extract_document(path: str | Path) -> dict:
     except Exception as exc:  # noqa: BLE001 — defensive: never crash a batch
         logger.warning("Extraction failed for %s: %s", path, exc)
         return _empty_record(path, STATUS_FAILED)
+
+
+def extract_document_bytes(content: bytes, filename: str) -> dict:
+    """
+    Extract in-memory *content* into the unified record, dispatching on the
+    *filename* extension. Same failure-tolerant contract as :func:`extract_document`.
+    """
+    suffix = Path(filename).suffix.lower()
+    extractor = _BYTES_EXTRACTORS.get(suffix)
+    if extractor is None:
+        return {**_empty_record(Path(filename), STATUS_UNSUPPORTED),
+                "file_type": suffix.lstrip(".")}
+    try:
+        return extractor(content, filename)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Extraction (bytes) failed for %s: %s", filename, exc)
+        return {**_empty_record(Path(filename), STATUS_FAILED), "file_type": "pdf"}
