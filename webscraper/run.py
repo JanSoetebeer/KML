@@ -92,6 +92,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Comma-separated file extensions to download (e.g. 'pdf,docx,png'). "
         "Defaults to the spider's built-in set if omitted.",
     )
+    parser.add_argument(
+        "--batch-id",
+        default=None,
+        help="Correlation id for this run. Used to name the classification review "
+        "manifest so a caller (webapp/Lambda) can fetch this run's results.",
+    )
     return parser.parse_args(argv)
 
 
@@ -104,14 +110,28 @@ def _parse_file_types(value) -> list[str] | None:
 
 
 def _collect_urls(args: argparse.Namespace) -> list[str]:
-    """Merge positional URLs and --urls-file into a deduplicated, ordered list."""
+    """Merge positional URLs and --urls-file into a deduplicated, ordered list.
+
+    ``--urls-file`` may be ``.csv`` (column-aware — picks the URL column, e.g.
+    ``Home Page``/``final_url``), ``.html``, or a plain ``.txt`` list.
+    """
+    from webscraper.utils.url_sources import (
+        extract_urls_from_csv_text,
+        extract_urls_from_html_text,
+        extract_urls_from_text_lines,
+    )
+
     urls: list[str] = list(args.urls)
     if args.urls_file:
         file_path = Path(args.urls_file)
-        for line in file_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if line and not line.startswith("#"):
-                urls.append(line)
+        raw = file_path.read_text(encoding="utf-8-sig")
+        suffix = file_path.suffix.lower()
+        if suffix == ".csv":
+            urls += extract_urls_from_csv_text(raw)
+        elif suffix in (".html", ".htm"):
+            urls += extract_urls_from_html_text(raw)
+        else:
+            urls += extract_urls_from_text_lines(raw)
     # Preserve order while dropping duplicates
     seen: set[str] = set()
     ordered: list[str] = []
@@ -141,6 +161,9 @@ def run_batch(
         2 if one or more jobs errored.
     """
     batch_id = batch_id or uuid.uuid4().hex
+    # Exposed to the crawl process (pipelines) so the classification manifest can
+    # be keyed by this run's id — the webapp/Lambda fetch results by the same id.
+    os.environ["SCRAPE_BATCH_ID"] = batch_id
     configure_logging(job_id=batch_id, level=log_level)
     logger = logging.getLogger(__name__)
 
@@ -214,6 +237,7 @@ def main(argv=None) -> None:
         max_jobs=args.max_jobs,
         ping=not args.no_ping,
         force=args.force,
+        batch_id=args.batch_id,
         file_types=_parse_file_types(args.file_types),
     )
     sys.exit(exit_code)

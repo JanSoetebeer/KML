@@ -1,0 +1,24 @@
+# Build context = repo root (for the Lambda image; see webscraper/Dockerfile).
+# Keep the context small: exclude data, venvs, caches, local state, secrets.
+.git
+.venv
+webscraper/.venv
+**/__pycache__
+**/*.pyc
+
+# Training data + regenerable cache (the model .joblib IS kept — it's needed).
+modulhandbuecher/
+mlclassifier/artifacts/*.jsonl
+
+# Local scraper state / outputs / logs — not needed in the image.
+webscraper/output/
+webscraper/logs/
+webscraper/state/
+webscraper/app.db
+webscraper/Log.txt
+
+# Secrets / keys / local env.
+*.pem
+*.key
+**/.env
+response.json

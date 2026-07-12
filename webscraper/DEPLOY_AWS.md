@@ -158,9 +158,10 @@ aws ecr get-login-password --region $REGION | `
   docker login --username AWS --password-stdin "$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
 
 # 4b. Build the image for the Lambda runtime architecture (x86_64).
-#     Run this from the project directory (where the Dockerfile lives):
-cd "C:\Users\jan\FH Wedel\Master\SS26\ML\KML\webscraper"
-docker build --platform linux/amd64 -t "${REPO}:latest" .
+#     Build from the REPO ROOT so the bundled mlclassifier package + trained
+#     model (which live outside webscraper/) are in the build context.
+cd "C:\Users\jan\FH Wedel\Master\SS26\ML\KML"
+docker build --platform linux/amd64 -f webscraper/Dockerfile -t "${REPO}:latest" .
 
 # 4c. Tag and push to ECR
 docker tag "${REPO}:latest" $IMAGE

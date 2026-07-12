@@ -84,10 +84,11 @@ variable "repo_subdir" {
   default     = "webscraper"
 }
 
+// TODO: change to main when ready
 variable "repo_branch" {
   description = "Git branch to check out."
   type        = string
-  default     = "main"
+  default     = "develop"
 }
 
 ########################################
@@ -157,7 +158,7 @@ variable "lambda_timeout" {
 }
 
 variable "lambda_memory_mb" {
-  description = "Lambda memory in MB."
+  description = "Lambda memory in MB. Bumped for the bundled ML classifier (scikit-learn/pandas/PyMuPDF load)."
   type        = number
-  default     = 1024
+  default     = 1536
 }

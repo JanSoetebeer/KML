@@ -43,6 +43,10 @@ it has never seen?* — instead of just re-recognising a familiar template.
 
 # Only (re)build the extraction cache, e.g. after adding data.
 .venv/Scripts/python -m mlclassifier build-dataset
+
+# Add reviewed scraped documents to the training set (see feedback loop below).
+.venv/Scripts/python -m mlclassifier ingest --manifest MANIFEST.jsonl --label positiv
+.venv/Scripts/python -m mlclassifier ingest some/dir_or_file.pdf --label negativ
 ```
 
 Artifacts are written to `mlclassifier/artifacts/`:
@@ -92,16 +96,33 @@ logs a warning. In the current data the two are ~equal, so the leaner, less-leak
 Read these as *directional* — with only ~21 universities the estimates are
 noisy. The next win is more (and harder) negatives and more universities.
 
-## Integration roadmap (next steps, not yet built)
+## Scraper integration & feedback loop (built)
 
-1. **Scrapy pipeline** — a `ClassificationPipeline` that runs after download:
-   extract text → `classify_document` → attach `{score, decision}` to the item /
-   sidecar file. Slots into `ITEM_PIPELINES` next to the storage pipelines.
-2. **Model artifact in S3** — publish `module_classifier.joblib` to the existing
-   bucket and load it at startup; register it in the webapp `SYS_AI_MODELS`
-   registry so admins can see/manage the active model version.
-3. **Review queue / active learning** — persist `needs_review` documents; feed
-   corrected labels back into `modulhandbuecher/` and retrain (spec §14).
+The scraper's `ClassificationPipeline` (enable with `CLASSIFIER_ENABLED=true`)
+scores every downloaded document via this package's `Classifier.classify_bytes`
+and writes a per-crawl review manifest to `webscraper/output/_review/`. The
+`ingest` command closes the loop back to training:
+
+```
+scrape → classify → review manifest → (human review) → ingest → retrain
+```
+
+- `ingest --manifest <file> --label positiv|negativ [--decision needs_review]`
+  copies manifest-listed files into `modulhandbuecher/<label>/<hostname>/`
+  (hostname = group, mirroring the university grouping).
+- `ingest <paths...> --label ... [--group NAME]` adds ad-hoc files/dirs.
+
+See [`../webscraper/README.md`](../webscraper/README.md) → *Document classification*.
+
+## Roadmap (next steps, not yet built)
+
+1. **Model artifact in S3** — publish `module_classifier.joblib` to the existing
+   bucket and load it at startup (`MODEL_PATH=s3://…` / synced file); register it
+   in the webapp `SYS_AI_MODELS` registry so admins can manage the active version.
+2. **Review UI** — surface the `needs_review` manifest in the webapp for one-click
+   labelling instead of hand-editing, then trigger `ingest` + retrain.
+3. **Threaded scoring** — move extraction/scoring off the crawl reactor thread so
+   large PDFs don't block concurrent jobs.
 
 ## Limitations
 

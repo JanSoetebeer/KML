@@ -1,5 +1,5 @@
 // Section "Scraping" (Abschnitt 1).
-import { api, apiForm } from "./api.js";
+import { api, apiForm, getToken } from "./api.js";
 
 function escapeHtml(s) {
   return String(s)
@@ -206,6 +206,94 @@ function renderResults(job) {
   results.innerHTML = html;
 }
 
+// ---------------------------------------------------------------------------
+// Classification results — the "relevant Modulhandbücher" view
+// ---------------------------------------------------------------------------
+
+const DECISION_LABELS = {
+  automatic_positive: "Modulhandbuch",
+  needs_review: "Zu prüfen",
+  automatic_negative: "Kein Modulhandbuch",
+};
+
+async function downloadDoc(jobId, index, filename) {
+  const t = getToken();
+  const res = await fetch(`/api/scrape/download/${jobId}/${index}`, {
+    headers: t ? { "X-Auth-Token": t } : {},
+  });
+  if (!res.ok) {
+    alert("Download fehlgeschlagen.");
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "dokument.pdf";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function renderClassification(jobId) {
+  const card = document.getElementById("sc-classify-card");
+  const box = document.getElementById("sc-classify");
+  let data;
+  try {
+    data = await api(`/api/scrape/results/${jobId}`);
+  } catch {
+    card.style.display = "none";
+    return;
+  }
+  if (!data.available) {
+    // Classification off or nothing scored — keep the panel hidden.
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+
+  const c = data.counts || {};
+  const summary =
+    `<p class="muted">` +
+    `${data.relevant.length} relevante Dokument(e) von ${c.total || 0} · ` +
+    `${c.automatic_positive || 0} Modulhandbuch, ${c.needs_review || 0} zu prüfen, ` +
+    `${c.automatic_negative || 0} aussortiert</p>`;
+
+  if (data.relevant.length === 0) {
+    box.innerHTML = summary + `<p class="muted">Keine relevanten Dokumente gefunden.</p>`;
+    return;
+  }
+
+  const rows = data.relevant
+    .map((r) => {
+      const score = r.score === null || r.score === undefined ? "—" : r.score.toFixed(3);
+      const label = DECISION_LABELS[r.decision] || r.decision;
+      return (
+        `<tr>` +
+        `<td>${escapeHtml(r.filename)}</td>` +
+        `<td><span class="badge badge-${r.decision === "automatic_positive" ? "scraped" : "pending"}">${escapeHtml(label)}</span></td>` +
+        `<td class="num">${score}</td>` +
+        `<td class="muted small" title="${escapeHtml(r.url)}">${escapeHtml(r.hostname)}</td>` +
+        `<td><button class="dl-btn" data-idx="${r.index}" data-name="${escapeHtml(r.filename)}">Download</button></td>` +
+        `</tr>`
+      );
+    })
+    .join("");
+
+  box.innerHTML =
+    summary +
+    `<div class="table-scroll"><table class="result-table">` +
+    `<thead><tr><th>Datei</th><th>Klassifikation</th><th>Score</th><th>Quelle</th><th></th></tr></thead>` +
+    `<tbody>${rows}</tbody></table></div>`;
+
+  box.querySelectorAll(".dl-btn").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      downloadDoc(jobId, Number(btn.dataset.idx), btn.dataset.name)
+    )
+  );
+}
+
 function pollStatus(jobId) {
   return new Promise((resolve) => {
     const tick = async () => {
@@ -224,6 +312,7 @@ function pollStatus(jobId) {
         return;
       }
       renderResults(job);
+      renderClassification(jobId);
       resolve(job.status === "done");
     };
     tick();
@@ -237,6 +326,7 @@ function setupStart() {
     const original = btn.textContent;
     btn.textContent = "Läuft…";
     showResultCard();
+    document.getElementById("sc-classify-card").style.display = "none";
     document.getElementById("sc-progress").innerHTML =
       `<div class="progress-wrap"><div class="progress-bar indeterminate"></div></div>` +
       `<p class="muted">Job wird gestartet …</p>`;

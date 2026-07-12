@@ -40,9 +40,19 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, StreamingResponse
 
 from ..auth import get_current_user
 from ..db import get_connection
+from webscraper.utils.url_sources import (
+    extract_urls_from_csv_text,
+    extract_urls_from_html_text,
+    extract_urls_from_text_lines,
+)
+
+# Decisions considered "relevant" to surface to the user (spec §9): confident
+# positives plus the uncertain review band. Confident negatives are hidden.
+_RELEVANT_DECISIONS = ("automatic_positive", "needs_review")
 
 router = APIRouter(prefix="/api/scrape", tags=["scrape"])
 
@@ -146,33 +156,6 @@ def get_available_models(user: dict = Depends(get_current_user)):
         conn.close()
 
 
-def _extract_urls_from_html(text: str) -> list[str]:
-    """Pull absolute http(s) links out of an uploaded HTML file."""
-    from parsel import Selector
-
-    sel = Selector(text=text)
-    urls: list[str] = []
-    for attr in ("a::attr(href)", "link::attr(href)"):
-        for href in sel.css(attr).getall():
-            href = (href or "").strip()
-            if href.startswith(("http://", "https://")):
-                urls.append(href)
-    return urls
-
-
-def _extract_urls_from_csv(text: str) -> list[str]:
-    """One URL per line; first comma-separated field; '#' comments ignored."""
-    urls: list[str] = []
-    for line in text.splitlines():
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        first = line.split(",")[0].strip()
-        if first:
-            urls.append(first)
-    return urls
-
-
 def _dedupe(urls: list[str]) -> list[str]:
     seen: set[str] = set()
     out: list[str] = []
@@ -268,6 +251,8 @@ def _run_local(payload: dict) -> tuple[bool, str, dict | None]:
         )
 
     cmd = [sys.executable, "run.py", *payload["urls"], "--max-jobs", "10"]
+    if payload.get("job_id"):
+        cmd += ["--batch-id", payload["job_id"]]
     file_types = payload.get("file_types")
     if file_types:
         cmd += ["--file-types", ",".join(file_types)]
@@ -419,15 +404,18 @@ def start_scrape(
         urls.append(url.strip())
 
     if file is not None and file.filename:
-        raw = file.file.read().decode("utf-8", errors="replace")
+        raw = file.file.read().decode("utf-8-sig", errors="replace")
         name = file.filename.lower()
         if name.endswith(".csv"):
-            urls += _extract_urls_from_csv(raw)
+            urls += extract_urls_from_csv_text(raw)
         elif name.endswith((".html", ".htm")):
-            urls += _extract_urls_from_html(raw)
+            urls += extract_urls_from_html_text(raw)
+        elif name.endswith(".txt"):
+            urls += extract_urls_from_text_lines(raw)
         else:
             raise HTTPException(
-                status_code=400, detail="Nur .csv oder .html Dateien werden unterstützt."
+                status_code=400,
+                detail="Nur .csv, .html oder .txt Dateien werden unterstützt.",
             )
 
     urls = _dedupe(urls)
@@ -497,6 +485,149 @@ def get_status(job_id: str, user: dict = Depends(get_current_user)):
     if view is None:
         raise HTTPException(status_code=404, detail="Unbekannte oder abgelaufene Job-ID.")
     return view
+
+
+# ---------------------------------------------------------------------------
+# Classification results (the "relevant Modulhandbücher" view)
+#
+# During a scrape the ClassificationPipeline writes a per-run review manifest
+# (JSONL). Locally it lands under output/_review/; in production the Lambda run
+# uploads it to s3://<bucket>/manifests/<job_id>.jsonl. These endpoints read it
+# back, surface the relevant documents, and serve downloads.
+# ---------------------------------------------------------------------------
+
+def _manifest_dir() -> Path:
+    env = os.getenv("REVIEW_MANIFEST_DIR")
+    if env:
+        return Path(env)
+    return Path(__file__).resolve().parent.parent.parent / "output" / "_review"
+
+
+def _load_manifest(job_id: str) -> list[dict] | None:
+    """Load a run's manifest from local disk, or S3 if configured. None if absent."""
+    local = _manifest_dir() / f"manifest_{job_id}.jsonl"
+    text: str | None = None
+    if local.exists():
+        text = local.read_text(encoding="utf-8")
+    elif os.getenv("S3_ENABLED", "false").lower() == "true" and os.getenv("S3_BUCKET"):
+        text = _read_manifest_from_s3(job_id)
+    if text is None:
+        return None
+    entries = []
+    for line in text.splitlines():
+        line = line.strip()
+        if line:
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return entries
+
+
+def _read_manifest_from_s3(job_id: str) -> str | None:
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client("s3", region_name=region)
+        try:
+            obj = client.get_object(
+                Bucket=os.getenv("S3_BUCKET"), Key=f"manifests/{job_id}.jsonl"
+            )
+        except ClientError:
+            return None
+        return obj["Body"].read().decode("utf-8")
+    except Exception:  # noqa: BLE001 — treat any S3 error as "no manifest"
+        return None
+
+
+@router.get("/results/{job_id}")
+def get_results(job_id: str, user: dict = Depends(get_current_user)):
+    """Structured classification results for a run: the relevant documents first."""
+    entries = _load_manifest(job_id)
+    if entries is None:
+        # Not an error: the run may have had classification disabled or found
+        # nothing. The frontend shows a friendly note.
+        return {"job_id": job_id, "available": False, "counts": {}, "relevant": []}
+
+    counts: dict[str, int] = {}
+    relevant = []
+    for idx, e in enumerate(entries):
+        decision = e.get("decision", "")
+        counts[decision] = counts.get(decision, 0) + 1
+        if decision in _RELEVANT_DECISIONS:
+            relevant.append(
+                {
+                    "index": idx,
+                    "filename": e.get("filename", ""),
+                    "hostname": e.get("hostname", ""),
+                    "url": e.get("url", ""),
+                    "score": e.get("module_handbook_score"),
+                    "decision": decision,
+                    "extraction_status": e.get("extraction_status", ""),
+                }
+            )
+    # Highest score first; None scores (unreadable) sink to the bottom.
+    relevant.sort(key=lambda r: (r["score"] is not None, r["score"] or 0), reverse=True)
+    counts["total"] = len(entries)
+    return {"job_id": job_id, "available": True, "counts": counts, "relevant": relevant}
+
+
+@router.get("/download/{job_id}/{index}")
+def download_result(
+    job_id: str, index: int, user: dict = Depends(get_current_user)
+):
+    """Download one scraped document by its manifest index (local file or S3)."""
+    entries = _load_manifest(job_id)
+    if entries is None or not (0 <= index < len(entries)):
+        raise HTTPException(status_code=404, detail="Datei nicht gefunden.")
+    entry = entries[index]
+    filename = entry.get("filename") or "document.pdf"
+
+    # Local file (dev / EC2-local storage): serve directly, guarding against
+    # path traversal by requiring the file to live under the output directory.
+    saved_path = entry.get("saved_path")
+    if saved_path:
+        path = Path(saved_path)
+        output_root = (Path(__file__).resolve().parent.parent.parent / "output").resolve()
+        try:
+            within = path.resolve().is_relative_to(output_root)
+        except (OSError, ValueError):
+            within = False
+        if within and path.exists():
+            return FileResponse(path, filename=filename, media_type="application/pdf")
+
+    # Otherwise stream the object from S3 through the app (keeps the request
+    # authenticated and avoids browser-side CORS on presigned URLs).
+    s3_key = entry.get("s3_key")
+    if s3_key and os.getenv("S3_BUCKET"):
+        stream = _stream_s3(s3_key)
+        if stream is not None:
+            return StreamingResponse(
+                stream,
+                media_type="application/pdf",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+
+    raise HTTPException(status_code=404, detail="Datei nicht verfügbar.")
+
+
+def _stream_s3(key: str):
+    """Return an iterator over an S3 object's bytes, or None if unavailable."""
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+    try:
+        import boto3
+        from botocore.exceptions import ClientError
+
+        client = boto3.client("s3", region_name=region)
+        try:
+            obj = client.get_object(Bucket=os.getenv("S3_BUCKET"), Key=key)
+        except ClientError:
+            return None
+        return obj["Body"].iter_chunks(chunk_size=64 * 1024)
+    except Exception:  # noqa: BLE001
+        return None
 
 
 @router.get("/log")
