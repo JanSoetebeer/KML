@@ -47,6 +47,12 @@ it has never seen?* — instead of just re-recognising a familiar template.
 # Add reviewed scraped documents to the training set (see feedback loop below).
 .venv/Scripts/python -m mlclassifier ingest --manifest MANIFEST.jsonl --label positiv
 .venv/Scripts/python -m mlclassifier ingest some/dir_or_file.pdf --label negativ
+
+# Close the human-in-the-loop: fold the webapp's per-document verdicts into the
+# training set and retrain in one step (see feedback loop below).
+.venv/Scripts/python -m mlclassifier feedback-retrain
+# Deployed app: pull ALL runs' verdicts (+ their documents) from S3, then retrain:
+.venv/Scripts/python -m mlclassifier feedback-retrain --from-s3 --s3-bucket <BUCKET>
 ```
 
 Artifacts are written to `mlclassifier/artifacts/`:
@@ -100,17 +106,33 @@ noisy. The next win is more (and harder) negatives and more universities.
 
 The scraper's `ClassificationPipeline` (enable with `CLASSIFIER_ENABLED=true`)
 scores every downloaded document via this package's `Classifier.classify_bytes`
-and writes a per-crawl review manifest to `webscraper/output/_review/`. The
-`ingest` command closes the loop back to training:
+and writes a per-crawl review manifest to `webscraper/output/_review/`. The full
+active-learning loop is now closed end to end:
 
 ```
-scrape → classify → review manifest → (human review) → ingest → retrain
+scrape → classify → review manifest → human verdict (webapp) → feedback-retrain → better model
 ```
 
-- `ingest --manifest <file> --label positiv|negativ [--decision needs_review]`
-  copies manifest-listed files into `modulhandbuecher/<label>/<hostname>/`
-  (hostname = group, mirroring the university grouping).
-- `ingest <paths...> --label ... [--group NAME]` adds ad-hoc files/dirs.
+**1. Human verdict (webapp).** In the *Relevante Dokumente & Prüfung* card a
+reviewer downloads an uncertain document and clicks **Modulhandbuch** / **Kein
+MH**. Each click `POST`s to `/api/scrape/feedback/{job_id}/{index}`, which stores
+the verdict in a per-run JSONL file mirroring the manifest:
+`webscraper/output/_review/feedback_<job_id>.jsonl` locally, and
+`s3://<bucket>/feedback/<job_id>.jsonl` in production. The verdict field is
+`positive` / `negative` — deliberately **model-agnostic**, so a future model with
+a different target reuses the same store unchanged.
+
+**2. Fold in + retrain (`feedback.py`).**
+
+- `feedback-retrain` gathers verdicts (every `feedback_*.jsonl` in the local
+  review dir by default; or `--from-s3` to pull them from the bucket —
+  auto-discovering every run under `feedback/`, or `--job-id <ID>` for one run),
+  resolves each document's bytes (from `saved_path`, else downloading its
+  `s3_key` from S3), copies it into `modulhandbuecher/<positiv|negativ>/<hostname>/`
+  under the **human** label, then retrains. `--no-train` ingests only.
+- `ingest-feedback` does the fold-in without retraining.
+- The older `ingest --manifest --label` (one blanket label per manifest) still
+  exists for bulk additions where no per-document review is needed.
 
 See [`../webscraper/README.md`](../webscraper/README.md) → *Document classification*.
 
@@ -119,8 +141,8 @@ See [`../webscraper/README.md`](../webscraper/README.md) → *Document classific
 1. **Model artifact in S3** — publish `module_classifier.joblib` to the existing
    bucket and load it at startup (`MODEL_PATH=s3://…` / synced file); register it
    in the webapp `SYS_AI_MODELS` registry so admins can manage the active version.
-2. **Review UI** — surface the `needs_review` manifest in the webapp for one-click
-   labelling instead of hand-editing, then trigger `ingest` + retrain.
+2. **Auto-redeploy after retrain** — the retrained artifact still has to be
+   rebuilt into the Lambda image by hand; automate model publish + Lambda update.
 3. **Threaded scoring** — move extraction/scoring off the crawl reactor thread so
    large PDFs don't block concurrent jobs.
 

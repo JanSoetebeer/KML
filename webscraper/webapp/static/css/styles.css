@@ -298,3 +298,26 @@ input[type="file"] { color: var(--muted); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* Human-in-the-loop review verdict buttons */
+.verdict-cell { white-space: nowrap; }
+.verdict-btn {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  margin-right: 0.25rem;
+}
+.verdict-btn:hover { background: #31405a; color: var(--text); }
+.verdict-btn.active-pos {
+  background: rgba(34, 197, 94, 0.2);
+  border-color: var(--ok);
+  color: #bbf7d0;
+}
+.verdict-btn.active-neg {
+  background: rgba(239, 68, 68, 0.2);
+  border-color: var(--danger);
+  color: #fecaca;
+}
+.verdict-hint { font-size: 0.72rem; color: var(--muted); margin-left: 0.15rem; }
