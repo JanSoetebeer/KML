@@ -1,0 +1,61 @@
+# Docker Compose stack for the FastAPI admin web app on EC2.
+#
+#   webapp  — FastAPI + uvicorn (internal only, port 8000)
+#   caddy   — reverse proxy terminating self-signed HTTPS on 443
+#
+# Bring it up with:  docker compose up -d --build
+# Configure secrets/vars in a `.env` file next to this compose file
+# (see .env.example: SECRET_KEY, ADMIN_USERNAME, ADMIN_PASSWORD,
+#  LAMBDA_FUNCTION_NAME, AWS_REGION, ...).
+
+services:
+  webapp:
+    build:
+      context: .
+      dockerfile: Dockerfile.webapp
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      # Signing key for session tokens — MUST be set (see .env).
+      SECRET_KEY: ${SECRET_KEY:?SECRET_KEY must be set in .env}
+      SESSION_MAX_AGE_SECONDS: ${SESSION_MAX_AGE_SECONDS:-43200}
+      # Seed admin (only applied on first DB creation).
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-0000}
+      # AWS Lambda trigger for the Scraping tab.
+      LAMBDA_FUNCTION_NAME: ${LAMBDA_FUNCTION_NAME:-}
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-eu-central-1}
+      # S3 access so the app can read classification manifests and stream the
+      # relevant documents for download (the Lambda writes both to this bucket).
+      S3_ENABLED: ${S3_ENABLED:-false}
+      S3_BUCKET: ${S3_BUCKET:-}
+      # Persistent paths inside the mounted volume.
+      APP_DB_PATH: /data/app.db
+      LOG_FILE: /data/Log.txt
+      MODELS_DIR: /data/SYS_AI_MODELS
+    volumes:
+      - webapp_data:/data
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - webapp
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      # The public address Caddy serves (Elastic IP, or a domain). Required so
+      # `tls internal` provisions a real leaf cert; see deploy/Caddyfile.
+      SITE_ADDRESS: ${SITE_ADDRESS:?SITE_ADDRESS must be set in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  webapp_data:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,94 @@
+2026-06-10 18:13:17 [INFO] root: Logging initialised — job_id=18f704313dfa4291846fe4751864bcd1  log_file=C:\Users\jan\FH Wedel\Master\SS26\ML\KML\webscraper\logs\18f704313dfa4291846fe4751864bcd1.log
+2026-06-10 18:13:17 [INFO] __main__: === webscraper job started  job_id=18f704313dfa4291846fe4751864bcd1 ===
+2026-06-10 18:13:17 [WARNING] webscraper.validators.url_validator: Probe returned HTTP 404 for 'https://example.com/resources' — proceeding anyway; Scrapy will handle the response during the crawl.
+2026-06-10 18:13:17 [INFO] webscraper.validators.url_validator: URL validated: https://example.com/resources
+2026-06-10 18:13:17 [INFO] scrapy.utils.log: Scrapy 2.11.2 started (bot: webscraper)
+2026-06-10 18:13:17 [INFO] scrapy.utils.log: Versions: lxml 6.1.1.0, libxml2 2.11.9, cssselect 1.4.0, parsel 1.11.0, w3lib 2.1.2, Twisted 23.10.0, Python 3.12.10 (tags/v3.12.10:0cc8128, Apr  8 2025, 12:21:36) [MSC v.1943 64 bit (AMD64)], pyOpenSSL 26.2.0 (OpenSSL 4.0.1 9 Jun 2026), cryptography 48.0.1, Platform Windows-11-10.0.26200-SP0
+2026-06-10 18:13:17 [INFO] webscraper.spiders.base_spider: [18f704313dfa4291846fe4751864bcd1] Spider 'document' initialised — crawled_at=2026-06-10T16:13:17.651503+00:00
+2026-06-10 18:13:17 [INFO] webscraper.spiders.document_spider: [18f704313dfa4291846fe4751864bcd1] DocumentSpider targeting: https://example.com/resources
+2026-06-10 18:13:17 [INFO] scrapy.addons: Enabled addons:
+[]
+2026-06-10 18:13:17 [DEBUG] asyncio: Using selector: SelectSelector
+2026-06-10 18:13:17 [DEBUG] scrapy.utils.log: Using reactor: twisted.internet.asyncioreactor.AsyncioSelectorReactor
+2026-06-10 18:13:17 [DEBUG] scrapy.utils.log: Using asyncio event loop: asyncio.windows_events._WindowsSelectorEventLoop
+2026-06-10 18:13:17 [INFO] scrapy.middleware: Enabled extensions:
+['scrapy.extensions.corestats.CoreStats',
+ 'scrapy.extensions.logstats.LogStats',
+ 'scrapy.extensions.throttle.AutoThrottle']
+2026-06-10 18:13:17 [INFO] scrapy.crawler: Overridden settings:
+{'AUTOTHROTTLE_ENABLED': True,
+ 'AUTOTHROTTLE_MAX_DELAY': 10.0,
+ 'AUTOTHROTTLE_START_DELAY': 1.0,
+ 'BOT_NAME': 'webscraper',
+ 'CONCURRENT_REQUESTS': 4,
+ 'CONCURRENT_REQUESTS_PER_DOMAIN': 2,
+ 'DOWNLOAD_DELAY': 1.0,
+ 'FEED_EXPORT_ENCODING': 'utf-8',
+ 'HTTPCACHE_EXPIRATION_SECS': 3600,
+ 'LOG_LEVEL': 'INFO',
+ 'NEWSPIDER_MODULE': 'webscraper.spiders',
+ 'REQUEST_FINGERPRINTER_IMPLEMENTATION': '2.7',
+ 'ROBOTSTXT_OBEY': True,
+ 'SPIDER_MODULES': ['webscraper.spiders'],
+ 'TELNETCONSOLE_ENABLED': False,
+ 'TWISTED_REACTOR': 'twisted.internet.asyncioreactor.AsyncioSelectorReactor',
+ 'USER_AGENT': 'webscraper/1.0 (+https://github.com/yourorg/webscraper)'}
+2026-06-10 18:13:18 [INFO] webscraper.middlewares.polite_middleware: PoliteMiddleware active — user_agent='webscraper/1.0 (+https://github.com/yourorg/webscraper)'  delay=1.0s  robots=True
+2026-06-10 18:13:18 [INFO] scrapy.middleware: Enabled downloader middlewares:
+['scrapy.downloadermiddlewares.offsite.OffsiteMiddleware',
+ 'scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware',
+ 'webscraper.middlewares.polite_middleware.PoliteMiddleware',
+ 'scrapy.downloadermiddlewares.httpauth.HttpAuthMiddleware',
+ 'scrapy.downloadermiddlewares.downloadtimeout.DownloadTimeoutMiddleware',
+ 'scrapy.downloadermiddlewares.defaultheaders.DefaultHeadersMiddleware',
+ 'scrapy.downloadermiddlewares.useragent.UserAgentMiddleware',
+ 'scrapy.downloadermiddlewares.retry.RetryMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.MetaRefreshMiddleware',
+ 'scrapy.downloadermiddlewares.redirect.RedirectMiddleware',
+ 'scrapy.downloadermiddlewares.cookies.CookiesMiddleware',
+ 'scrapy.downloadermiddlewares.httpproxy.HttpProxyMiddleware',
+ 'scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware',
+ 'scrapy.downloadermiddlewares.stats.DownloaderStats']
+2026-06-10 18:13:18 [INFO] scrapy.middleware: Enabled spider middlewares:
+['scrapy.spidermiddlewares.httperror.HttpErrorMiddleware',
+ 'scrapy.spidermiddlewares.referer.RefererMiddleware',
+ 'scrapy.spidermiddlewares.urllength.UrlLengthMiddleware',
+ 'scrapy.spidermiddlewares.depth.DepthMiddleware']
+2026-06-10 18:13:18 [INFO] scrapy.middleware: Enabled item pipelines:
+['webscraper.pipelines.local_storage_pipeline.LocalStoragePipeline']
+2026-06-10 18:13:18 [INFO] scrapy.core.engine: Spider opened
+2026-06-10 18:13:18 [DEBUG] webscraper.pipelines.base_pipeline: LocalStoragePipeline opened for spider 'document'.
+2026-06-10 18:13:18 [INFO] scrapy.extensions.logstats: Crawled 0 pages (at 0 pages/min), scraped 0 items (at 0 items/min)
+2026-06-10 18:13:18 [DEBUG] scrapy.core.engine: Crawled (404) <GET https://example.com/robots.txt> (referer: None)
+2026-06-10 18:13:18 [DEBUG] protego._protego: Rule at line 1 without any user agent to enforce it on.
+2026-06-10 18:13:19 [DEBUG] scrapy.core.engine: Crawled (404) <GET https://example.com/resources> (referer: None)
+2026-06-10 18:13:19 [INFO] scrapy.spidermiddlewares.httperror: Ignoring response <404 https://example.com/resources>: HTTP status code is not handled or not allowed
+2026-06-10 18:13:19 [INFO] scrapy.core.engine: Closing spider (finished)
+2026-06-10 18:13:19 [DEBUG] webscraper.pipelines.base_pipeline: LocalStoragePipeline closed for spider 'document'.
+2026-06-10 18:13:19 [INFO] webscraper.spiders.base_spider: [18f704313dfa4291846fe4751864bcd1] Spider 'document' closed — reason=finished
+2026-06-10 18:13:19 [INFO] scrapy.statscollectors: Dumping Scrapy stats:
+{'downloader/request_bytes': 483,
+ 'downloader/request_count': 2,
+ 'downloader/request_method_count/GET': 2,
+ 'downloader/response_bytes': 1168,
+ 'downloader/response_count': 2,
+ 'downloader/response_status_count/404': 2,
+ 'elapsed_time_seconds': 1.635182,
+ 'finish_reason': 'finished',
+ 'finish_time': datetime.datetime(2026, 6, 10, 16, 13, 19, 959153, tzinfo=datetime.timezone.utc),
+ 'httpcompression/response_bytes': 1118,
+ 'httpcompression/response_count': 2,
+ 'httperror/response_ignored_count': 1,
+ 'httperror/response_ignored_status_count/404': 1,
+ 'log_count/INFO': 11,
+ 'response_received_count': 2,
+ 'robotstxt/request_count': 1,
+ 'robotstxt/response_count': 1,
+ 'robotstxt/response_status_count/404': 1,
+ 'scheduler/dequeued': 1,
+ 'scheduler/dequeued/memory': 1,
+ 'scheduler/enqueued': 1,
+ 'scheduler/enqueued/memory': 1,
+ 'start_time': datetime.datetime(2026, 6, 10, 16, 13, 18, 323971, tzinfo=datetime.timezone.utc)}
+2026-06-10 18:13:19 [INFO] scrapy.core.engine: Spider closed (finished)
+2026-06-10 18:13:19 [INFO] __main__: === webscraper job finished  job_id=18f704313dfa4291846fe4751864bcd1 ===

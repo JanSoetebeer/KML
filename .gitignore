@@ -1,0 +1,39 @@
+.env
+logs
+state
+.venv
+output
+*.pyc
+__pycache__
+app.db
+Log.txt
+webscraper/SYS_AI_MODELS
+
+# Private keys / credentials — never commit
+*.pem
+*.key
+
+# Stray local artifacts
+response.json
+
+# Resolved IAM policy files generated from webscraper/aws/*.json templates
+# (they contain your real account id — only the placeholder templates are tracked).
+*.resolved.json
+
+# Local deploy / operational artifacts (not for the repo)
+env.json
+*.tgz
+
+# ML classifier: training data (large) + the regenerable extraction cache.
+# The trained model (*.joblib) IS committed — it's bundled into the Lambda image
+# at deploy time and is the artifact the scraper classifies with.
+# training_report.json is kept too (small, useful to diff across runs).
+modulhandbuecher/
+mlclassifier/artifacts/*.jsonl
+
+# Terraform (state can contain secrets; plugins are large)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example

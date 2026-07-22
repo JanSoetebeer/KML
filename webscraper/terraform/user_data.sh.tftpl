@@ -1,0 +1,55 @@
+#!/bin/bash
+# Bootstraps the webscraper admin web app on Amazon Linux 2023:
+#   Docker + Compose + buildx -> clone repo -> write .env -> docker compose up.
+# Rendered by Terraform's templatefile(); placeholders are substituted at plan time.
+set -euxo pipefail
+
+# --- Docker engine ---------------------------------------------------------
+dnf update -y
+dnf install -y docker git
+systemctl enable --now docker
+usermod -aG docker ec2-user
+
+# --- Compose v2 + buildx plugins (AL2023's docker pkg ships neither) --------
+mkdir -p /usr/local/lib/docker/cli-plugins
+curl -SL "https://github.com/docker/compose/releases/latest/download/docker-compose-linux-x86_64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-compose
+chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+
+BUILDX_VER=v0.19.3
+curl -SL "https://github.com/docker/buildx/releases/download/$${BUILDX_VER}/buildx-$${BUILDX_VER}.linux-amd64" \
+  -o /usr/local/lib/docker/cli-plugins/docker-buildx
+chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+
+# --- Application code -------------------------------------------------------
+install -d -o ec2-user -g ec2-user /opt/app
+git clone --branch "${repo_branch}" "${repo_url}" /opt/app/repo
+APP_DIR="/opt/app/repo/${repo_subdir}"
+cd "$APP_DIR"
+
+# --- Environment file (consumed by docker-compose.yml) ----------------------
+# AWS credentials are intentionally omitted — the EC2 instance role supplies
+# them to boto3 automatically.
+set +x  # keep SECRET_KEY / ADMIN_PASSWORD out of the cloud-init trace log
+cat > "$APP_DIR/.env" <<'ENVEOF'
+SECRET_KEY=${secret_key}
+SESSION_MAX_AGE_SECONDS=${session_max_age_seconds}
+ADMIN_USERNAME=${admin_username}
+ADMIN_PASSWORD=${admin_password}
+SITE_ADDRESS=${site_address}
+LAMBDA_FUNCTION_NAME=${lambda_function_name}
+AWS_REGION=${aws_region}
+AWS_DEFAULT_REGION=${aws_region}
+S3_ENABLED=${s3_enabled}
+S3_BUCKET=${s3_bucket}
+VISITED_STORE_BACKEND=${visited_backend}
+DYNAMODB_TABLE=${dynamodb_table}
+ENVEOF
+chown ec2-user:ec2-user "$APP_DIR/.env"
+chmod 600 "$APP_DIR/.env"
+set -x
+
+# --- Launch the stack ------------------------------------------------------
+docker compose up -d --build
+
+echo "webscraper webapp bootstrap complete at $(date -u)"

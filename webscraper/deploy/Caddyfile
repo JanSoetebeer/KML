@@ -1,0 +1,30 @@
+# Caddy reverse proxy with a self-signed certificate (no domain required).
+#
+# The site is bound to SITE_ADDRESS (the Elastic IP, set in .env). Binding to a
+# concrete address makes `tls internal` actually provision an internal-CA leaf
+# certificate (with the IP as a SAN) and serve it as the default — without a
+# hostname, a bare `:443` site provisions no cert and the TLS handshake fails
+# with "internal error".
+#
+# Browsers will show a "not secure / proceed anyway" warning because the CA is
+# not publicly trusted — that is expected for the self-signed setup.
+
+{
+	# No public domain — use Caddy's internal CA, never attempt public ACME.
+	local_certs
+	# Clients connecting by IP send no SNI; behind Docker's NAT Caddy would
+	# otherwise assume the container's internal IP and find no matching cert
+	# ("tls: internal error"). Assume SITE_ADDRESS for empty-SNI handshakes so
+	# the IP certificate is served. See caddyserver/caddy#6364.
+	default_sni {$SITE_ADDRESS}
+}
+
+https://{$SITE_ADDRESS} {
+	tls internal
+	encode gzip
+	reverse_proxy webapp:8000
+}
+
+http://{$SITE_ADDRESS} {
+	redir https://{host}{uri} permanent
+}
