@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 
 # Header names that carry a usable URL, most-preferred first.
 _URL_HEADERS = (
@@ -28,9 +29,23 @@ _URL_HEADERS = (
     "web", "link", "home",
 )
 
+# A URL embedded anywhere in a cell. Stops at whitespace, quotes, and the common
+# CSV delimiters so an over-quoted row (many columns collapsed into one field)
+# still yields just the URL rather than the rest of the row.
+_URL_RE = re.compile(r"""https?://[^\s,;"'<>]+""")
+
 
 def _is_url(value: str) -> bool:
     return value.strip().lower().startswith(("http://", "https://"))
+
+
+def _find_url_in_row(row: list[str]) -> str:
+    """First http(s) URL found *inside* any cell (handles over-quoted rows)."""
+    for cell in row:
+        m = _URL_RE.search(cell)
+        if m:
+            return m.group(0)
+    return ""
 
 
 def _dedupe(urls: list[str]) -> list[str]:
@@ -77,8 +92,12 @@ def extract_urls_from_csv_text(text: str) -> list[str]:
         value = ""
         if url_col is not None and url_col < len(row) and _is_url(row[url_col]):
             value = row[url_col].strip()
-        else:
+        if not value:
             value = next((c.strip() for c in row if _is_url(c)), "")
+        if not value:
+            # Over-quoted rows collapse many columns into one field, so the URL
+            # isn't at a cell boundary — find it embedded anywhere in the row.
+            value = _find_url_in_row(row)
         if value:
             urls.append(value)
     return _dedupe(urls)
