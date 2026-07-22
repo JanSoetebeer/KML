@@ -24,13 +24,25 @@ if [ -z "$APP" ]; then
   exit 1
 fi
 
+# SSM runs this as root, but the checkout is owned by ec2-user — git would abort
+# with "dubious ownership". Trust all repos for the user running this (root here)
+# BEFORE any other git call. Idempotent so /root/.gitconfig doesn't accumulate.
+if ! git config --global --get-all safe.directory 2>/dev/null | grep -Fxq '*'; then
+  git config --global --add safe.directory '*'
+fi
+
+# Guard: a clear error if $APP is a plain copy (scp) rather than a git checkout.
+if ! git -C "$APP" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: $APP is not a git checkout — 'git pull' can't work there."
+  echo "Re-clone the repo on the instance (see .github/DEPLOY_CICD.md)."
+  exit 1
+fi
+
 # Fast-forward the checkout to the deployed commit on main. .env and the
 # app.db/Log.txt volume are untracked / external, so reset --hard leaves them.
-TOP=$(git -C "$APP" rev-parse --show-toplevel)
-git config --global --add safe.directory "$TOP"
-git -C "$TOP" fetch --prune origin main
-git -C "$TOP" checkout main
-git -C "$TOP" reset --hard origin/main
+git -C "$APP" fetch --prune origin main
+git -C "$APP" checkout main
+git -C "$APP" reset --hard origin/main
 
 # Rebuild + restart the stack (webapp + caddy). Idempotent.
 cd "$APP"
