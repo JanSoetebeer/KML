@@ -115,7 +115,10 @@ def _load_cache(cache_path: Path) -> dict[str, dict]:
 
 def _write_cache(cache_path: Path, entries: dict[str, dict]) -> None:
     cache_path.parent.mkdir(parents=True, exist_ok=True)
-    with cache_path.open("w", encoding="utf-8") as fh:
+    # errors="replace" is a safety net: extraction already strips invalid
+    # surrogates, but a stray un-encodable char must never abort the whole run
+    # (and lose all extraction work) at the final cache-write step.
+    with cache_path.open("w", encoding="utf-8", errors="replace") as fh:
         for entry in entries.values():
             fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 

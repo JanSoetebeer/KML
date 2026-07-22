@@ -29,11 +29,24 @@ those optional dependencies; wiring them in is a drop-in later step.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from . import config
 
 logger = logging.getLogger(__name__)
+
+# Lone UTF-16 surrogate code points (U+D800–U+DFFF). PyMuPDF can emit these from
+# malformed PDFs; they are not valid UTF-8, so they crash JSON caching and any
+# utf-8 write. Strip them at the source so no downstream step ever sees them.
+_SURROGATE_RE = re.compile("[\ud800-\udfff]")
+
+
+def _sanitize(text: str) -> str:
+    """Remove lone surrogate code points that can't be UTF-8 encoded."""
+    if not text:
+        return text
+    return _SURROGATE_RE.sub("", text)
 
 # Extraction status values.
 STATUS_OK = "classified"           # text extracted, enough of it
@@ -71,9 +84,9 @@ def _record_from_pdf_doc(doc, filename: str) -> dict:
                 parts.append(page.get_text())
             except Exception as exc:  # noqa: BLE001 — skip a bad page, keep the rest
                 logger.debug("page extract failed in %s: %s", filename, exc)
-        text = "\n".join(parts)
+        text = _sanitize("\n".join(parts))
         page_count = doc.page_count
-        title = (doc.metadata or {}).get("title") or ""
+        title = _sanitize((doc.metadata or {}).get("title") or "")
     finally:
         doc.close()
 
