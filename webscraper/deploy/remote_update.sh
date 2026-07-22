@@ -9,6 +9,10 @@
 # POSIX sh only (no bashisms) — the SSM agent executes this with /bin/sh.
 set -eux
 
+# SSM runs commands as root but with a bare environment — $HOME is unset, which
+# makes `git config --global` fail with "$HOME not set". Set it explicitly.
+export HOME="${HOME:-/root}"
+
 : "${WEBAPP_DIR:=}"
 
 # Locate the directory that holds docker-compose.yml. WEBAPP_DIR (if set) wins,
