@@ -1,0 +1,79 @@
+name: Deploy scraper Lambda
+
+# Builds the scraper + ML container image from the repo root (so the bundled
+# mlclassifier package and the trained model are in the build context), pushes it
+# to ECR, and points the Lambda at the new image. Runs on every push to main that
+# touches the scraper/ML code — webapp-only and docs-only changes are excluded.
+#
+# One-time AWS setup (OIDC role, ECR repo, permissions) and the required repo
+# variables are documented in .github/DEPLOY_CICD.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "webscraper/**"
+      - "mlclassifier/**"
+      - ".github/workflows/deploy-lambda.yml"
+      - "!webscraper/webapp/**"
+      - "!**/*.md"
+  workflow_dispatch: {}
+
+# Required for OIDC federation (no long-lived AWS keys).
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECR_REPOSITORY: webscraper
+  LAMBDA_FUNCTION: webscraper
+
+concurrency:
+  group: deploy-lambda
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Log in to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push image
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+        run: |
+          set -euo pipefail
+          IMAGE="$REGISTRY/$ECR_REPOSITORY:${{ github.sha }}"
+          LATEST="$REGISTRY/$ECR_REPOSITORY:latest"
+          # Build from the repo root with the webscraper Dockerfile so mlclassifier/
+          # and the trained model (outside webscraper/) are included.
+          docker build --platform linux/amd64 -f webscraper/Dockerfile -t "$IMAGE" -t "$LATEST" .
+          docker push "$IMAGE"
+          docker push "$LATEST"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+
+      - name: Update Lambda to the new image
+        run: |
+          set -euo pipefail
+          # Point at the immutable per-commit tag so Lambda pulls exactly this build.
+          aws lambda update-function-code \
+            --function-name "$LAMBDA_FUNCTION" \
+            --image-uri "$IMAGE" \
+            --region "$AWS_REGION" \
+            --publish
+          aws lambda wait function-updated \
+            --function-name "$LAMBDA_FUNCTION" \
+            --region "$AWS_REGION"
+          echo "Lambda $LAMBDA_FUNCTION now running $IMAGE"

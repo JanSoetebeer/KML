@@ -41,6 +41,7 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from ..auth import get_current_user
 from ..db import get_connection
@@ -84,7 +85,14 @@ _SUMMARY_MARKER = "__SCRAPE_SUMMARY__"
 _JOBS: dict[str, dict] = {}
 _JOBS_LOCK = threading.Lock()
 _LOG_LOCK = threading.Lock()
+_FEEDBACK_LOCK = threading.Lock()
 _MAX_JOBS_KEPT = 50
+
+# The two human verdicts. Kept model-agnostic on purpose: this run's model
+# happens to detect Modulhandbücher, but the loop only ever asks "is this
+# document a positive or a negative example?" so a future model with an entirely
+# different target reuses the same store unchanged (spec §14).
+_VERDICTS = ("positive", "negative")
 
 # Grouped catalogue of supported file types. Captions are shown in the UI.
 FILE_TYPE_GROUPS: dict[str, list[dict]] = {
@@ -510,7 +518,7 @@ def _load_manifest(job_id: str) -> list[dict] | None:
     if local.exists():
         text = local.read_text(encoding="utf-8")
     elif os.getenv("S3_ENABLED", "false").lower() == "true" and os.getenv("S3_BUCKET"):
-        text = _read_manifest_from_s3(job_id)
+        text = _read_s3_text(f"manifests/{job_id}.jsonl")
     if text is None:
         return None
     entries = []
@@ -524,7 +532,8 @@ def _load_manifest(job_id: str) -> list[dict] | None:
     return entries
 
 
-def _read_manifest_from_s3(job_id: str) -> str | None:
+def _read_s3_text(key: str) -> str | None:
+    """Read a text object from the configured bucket, or None if absent/unreachable."""
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
     try:
         import boto3
@@ -532,13 +541,11 @@ def _read_manifest_from_s3(job_id: str) -> str | None:
 
         client = boto3.client("s3", region_name=region)
         try:
-            obj = client.get_object(
-                Bucket=os.getenv("S3_BUCKET"), Key=f"manifests/{job_id}.jsonl"
-            )
+            obj = client.get_object(Bucket=os.getenv("S3_BUCKET"), Key=key)
         except ClientError:
             return None
         return obj["Body"].read().decode("utf-8")
-    except Exception:  # noqa: BLE001 — treat any S3 error as "no manifest"
+    except Exception:  # noqa: BLE001 — treat any S3 error as "not available"
         return None
 
 
@@ -551,12 +558,17 @@ def get_results(job_id: str, user: dict = Depends(get_current_user)):
         # nothing. The frontend shows a friendly note.
         return {"job_id": job_id, "available": False, "counts": {}, "relevant": []}
 
+    # Human verdicts recorded so far (index -> feedback entry), so the UI can
+    # show what has already been reviewed and highlight corrections.
+    feedback = _load_feedback(job_id)
+
     counts: dict[str, int] = {}
     relevant = []
     for idx, e in enumerate(entries):
         decision = e.get("decision", "")
         counts[decision] = counts.get(decision, 0) + 1
         if decision in _RELEVANT_DECISIONS:
+            fb = feedback.get(idx)
             relevant.append(
                 {
                     "index": idx,
@@ -566,11 +578,14 @@ def get_results(job_id: str, user: dict = Depends(get_current_user)):
                     "score": e.get("module_handbook_score"),
                     "decision": decision,
                     "extraction_status": e.get("extraction_status", ""),
+                    "verdict": fb.get("verdict") if fb else None,
+                    "reviewed_by": fb.get("reviewer") if fb else None,
                 }
             )
     # Highest score first; None scores (unreadable) sink to the bottom.
     relevant.sort(key=lambda r: (r["score"] is not None, r["score"] or 0), reverse=True)
     counts["total"] = len(entries)
+    counts["reviewed"] = len(feedback)
     return {"job_id": job_id, "available": True, "counts": counts, "relevant": relevant}
 
 
@@ -628,6 +643,140 @@ def _stream_s3(key: str):
         return obj["Body"].iter_chunks(chunk_size=64 * 1024)
     except Exception:  # noqa: BLE001
         return None
+
+
+# ---------------------------------------------------------------------------
+# Human-in-the-loop feedback (spec §14)
+#
+# For each surfaced document a reviewer records a verdict — is this a positive
+# or a negative example? Verdicts are stored as a per-run JSONL file that mirrors
+# the review manifest exactly: local under output/_review/feedback_<job_id>.jsonl
+# and mirrored to s3://<bucket>/feedback/<job_id>.jsonl when S3 is enabled. That
+# is the bridge the offline retrain reads (`python -m mlclassifier
+# feedback-retrain`) to fold confirmed documents into the training set.
+#
+# The file is rewritten wholesale on each verdict (latest wins per index) so a
+# reviewer can correct a mistake, and so the S3 object always holds the full,
+# current set rather than an append log that would need compaction.
+# ---------------------------------------------------------------------------
+
+
+class FeedbackIn(BaseModel):
+    verdict: str
+
+
+def _feedback_path(job_id: str) -> Path:
+    return _manifest_dir() / f"feedback_{job_id}.jsonl"
+
+
+def _feedback_s3_key(job_id: str) -> str:
+    return f"feedback/{job_id}.jsonl"
+
+
+def _parse_feedback_text(text: str) -> dict[int, dict]:
+    """Parse feedback JSONL into an index -> entry map (later lines win)."""
+    out: dict[int, dict] = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        idx = entry.get("index")
+        if isinstance(idx, int):
+            out[idx] = entry
+    return out
+
+
+def _load_feedback(job_id: str) -> dict[int, dict]:
+    """Load a run's verdicts from local disk, falling back to S3. {} if none."""
+    local = _feedback_path(job_id)
+    if local.exists():
+        return _parse_feedback_text(local.read_text(encoding="utf-8"))
+    if os.getenv("S3_ENABLED", "false").lower() == "true" and os.getenv("S3_BUCKET"):
+        text = _read_s3_text(_feedback_s3_key(job_id))
+        if text is not None:
+            return _parse_feedback_text(text)
+    return {}
+
+
+def _write_feedback(job_id: str, entries: dict[int, dict]) -> None:
+    """Persist the full verdict set locally and mirror it to S3 if enabled."""
+    path = _feedback_path(job_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    body = "".join(
+        json.dumps(entries[i], ensure_ascii=False) + "\n" for i in sorted(entries)
+    )
+    path.write_text(body, encoding="utf-8")
+    _upload_feedback_to_s3(job_id, path)
+
+
+def _upload_feedback_to_s3(job_id: str, path: Path) -> None:
+    if not (os.getenv("S3_ENABLED", "false").lower() == "true" and os.getenv("S3_BUCKET")):
+        return
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+    try:
+        import boto3
+
+        boto3.client("s3", region_name=region).upload_file(
+            str(path), os.getenv("S3_BUCKET"), _feedback_s3_key(job_id),
+            ExtraArgs={"ContentType": "application/x-ndjson"},
+        )
+    except Exception:  # noqa: BLE001 — a failed mirror must not fail the verdict
+        pass
+
+
+@router.post("/feedback/{job_id}/{index}")
+def submit_feedback(
+    job_id: str,
+    index: int,
+    body: FeedbackIn,
+    user: dict = Depends(get_current_user),
+):
+    """Record a reviewer's positive/negative verdict for one scraped document."""
+    verdict = (body.verdict or "").strip().lower()
+    if verdict not in _VERDICTS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ungültiges Verdict {body.verdict!r}; erlaubt: {', '.join(_VERDICTS)}.",
+        )
+
+    entries = _load_manifest(job_id)
+    if entries is None or not (0 <= index < len(entries)):
+        raise HTTPException(status_code=404, detail="Dokument nicht gefunden.")
+    doc = entries[index]
+
+    # Store a self-contained record: the retrain step then never needs to
+    # re-join against the manifest to know the file's identity and true label.
+    entry = {
+        "index": index,
+        "job_id": job_id,
+        "verdict": verdict,
+        "filename": doc.get("filename", ""),
+        "hostname": doc.get("hostname", ""),
+        "url": doc.get("url", ""),
+        "saved_path": doc.get("saved_path", ""),
+        "s3_key": doc.get("s3_key", ""),
+        "model_decision": doc.get("decision", ""),
+        "model_score": doc.get("module_handbook_score"),
+        "model_version": doc.get("model_version", ""),
+        "reviewer": user.get("username", ""),
+        "reviewed_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    with _FEEDBACK_LOCK:
+        current = _load_feedback(job_id)
+        current[index] = entry
+        _write_feedback(job_id, current)
+        reviewed = len(current)
+
+    _append_log(
+        [f"Feedback: {user.get('username', '?')} → {verdict} für "
+         f"{doc.get('filename', '?')} (job={job_id}, #{index})"]
+    )
+    return {"ok": True, "index": index, "verdict": verdict, "reviewed": reviewed}
 
 
 @router.get("/log")

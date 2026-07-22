@@ -150,24 +150,33 @@ It loads the model **once per process** (shared across concurrent jobs) and
 **degrades to a no-op** — the crawl runs unchanged — if the model file or the ML
 dependencies are missing.
 
-### Scrape → train feedback loop
+### Scrape → review → retrain feedback loop
 
-The manifest is the bridge back to training (active learning): review the
-uncertain band, then fold confirmed documents into the labelled set and retrain.
+The manifest is the bridge back to training (active learning). In the webapp's
+*Relevante Dokumente & Prüfung* card a reviewer confirms each uncertain document
+as **Modulhandbuch** (positive) or **Kein MH** (negative). Those verdicts are
+stored per run in `output/_review/feedback_<job_id>.jsonl` (mirrored to
+`s3://<bucket>/feedback/<job_id>.jsonl`) via
+`POST /api/scrape/feedback/{job_id}/{index}`, then folded back into training:
 
 ```bash
 # 1. Crawl with classification on
 CLASSIFIER_ENABLED=true python run.py https://some-university.de/studium
 
-# 2. Ingest reviewed positives/negatives (grouped by hostname automatically)
-python -m mlclassifier ingest --manifest output/_review/manifest_<job_id>.jsonl \
-    --label positiv --decision needs_review
-#   ...or ad-hoc files/dirs:
-python -m mlclassifier ingest output/some-host/<job_id>/ --label negativ
+# 2. Review the uncertain documents in the webapp (per-document verdicts)
 
-# 3. Retrain on the grown dataset
-python -m mlclassifier train
+# 3. Fold the human verdicts in and retrain — one step.
+#    Deployed app (Lambda/EC2 → everything is in S3): pull every reviewed run's
+#    verdicts AND documents from the bucket, then retrain locally:
+python -m mlclassifier feedback-retrain --from-s3 --s3-bucket <BUCKET>
+#    Local dev (files already on disk): just read the local review dir:
+python -m mlclassifier feedback-retrain
 ```
+
+The verdict is stored as `positive` / `negative` (model-agnostic), so the same
+loop serves a future model with a different target. The older
+`ingest --manifest --label` (one blanket label per manifest) remains for bulk
+additions that don't need per-document review.
 
 > Scoring runs inline on the crawl thread; a very large PDF briefly blocks other
 > jobs in the same process. Moving extraction to a thread pool is a future

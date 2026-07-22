@@ -1,6 +1,10 @@
 // Section "Scraping" (Abschnitt 1).
 import { api, apiForm, getToken } from "./api.js";
 
+// The two human verdicts (model-agnostic on purpose — see scrape.py). For this
+// model, positive = Modulhandbuch. Only the button captions are MH-specific.
+const VERDICT_LABELS = { positive: "Modulhandbuch", negative: "Kein MH" };
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -258,7 +262,11 @@ async function renderClassification(jobId) {
     `<p class="muted">` +
     `${data.relevant.length} relevante Dokument(e) von ${c.total || 0} · ` +
     `${c.automatic_positive || 0} Modulhandbuch, ${c.needs_review || 0} zu prüfen, ` +
-    `${c.automatic_negative || 0} aussortiert</p>`;
+    `${c.automatic_negative || 0} aussortiert · ` +
+    `${c.reviewed || 0} geprüft</p>` +
+    `<p class="muted small">Prüfen Sie unsichere Dokumente per Download und bestätigen ` +
+    `Sie Modulhandbuch / Kein MH. Die Verdicts trainieren das Modell nach ` +
+    `(<code>python -m mlclassifier feedback-retrain</code>).</p>`;
 
   if (data.relevant.length === 0) {
     box.innerHTML = summary + `<p class="muted">Keine relevanten Dokumente gefunden.</p>`;
@@ -275,6 +283,7 @@ async function renderClassification(jobId) {
         `<td><span class="badge badge-${r.decision === "automatic_positive" ? "scraped" : "pending"}">${escapeHtml(label)}</span></td>` +
         `<td class="num">${score}</td>` +
         `<td class="muted small" title="${escapeHtml(r.url)}">${escapeHtml(r.hostname)}</td>` +
+        `<td class="verdict-cell">${verdictButtons(r)}</td>` +
         `<td><button class="dl-btn" data-idx="${r.index}" data-name="${escapeHtml(r.filename)}">Download</button></td>` +
         `</tr>`
       );
@@ -284,7 +293,8 @@ async function renderClassification(jobId) {
   box.innerHTML =
     summary +
     `<div class="table-scroll"><table class="result-table">` +
-    `<thead><tr><th>Datei</th><th>Klassifikation</th><th>Score</th><th>Quelle</th><th></th></tr></thead>` +
+    `<thead><tr><th>Datei</th><th>Klassifikation</th><th>Score</th><th>Quelle</th>` +
+    `<th>Prüfung</th><th></th></tr></thead>` +
     `<tbody>${rows}</tbody></table></div>`;
 
   box.querySelectorAll(".dl-btn").forEach((btn) =>
@@ -292,6 +302,49 @@ async function renderClassification(jobId) {
       downloadDoc(jobId, Number(btn.dataset.idx), btn.dataset.name)
     )
   );
+  box.querySelectorAll(".verdict-btn").forEach((btn) =>
+    btn.addEventListener("click", () =>
+      submitVerdict(jobId, Number(btn.dataset.idx), btn.dataset.verdict, btn)
+    )
+  );
+}
+
+// Two verdict buttons for one row, highlighting whichever verdict is stored.
+function verdictButtons(r) {
+  const mk = (v) => {
+    const active = r.verdict === v ? ` active-${v === "positive" ? "pos" : "neg"}` : "";
+    return (
+      `<button class="verdict-btn${active}" data-idx="${r.index}" ` +
+      `data-verdict="${v}">${escapeHtml(VERDICT_LABELS[v])}</button>`
+    );
+  };
+  const who = r.reviewed_by
+    ? `<span class="verdict-hint">von ${escapeHtml(r.reviewed_by)}</span>`
+    : "";
+  return mk("positive") + mk("negative") + who;
+}
+
+async function submitVerdict(jobId, index, verdict, btn) {
+  const cell = btn.closest(".verdict-cell");
+  const buttons = cell ? cell.querySelectorAll(".verdict-btn") : [btn];
+  buttons.forEach((b) => (b.disabled = true));
+  try {
+    await api(`/api/scrape/feedback/${jobId}/${index}`, {
+      method: "POST",
+      body: { verdict },
+    });
+    // Reflect the stored verdict without a full reload.
+    buttons.forEach((b) => {
+      b.classList.remove("active-pos", "active-neg");
+      if (b.dataset.verdict === verdict) {
+        b.classList.add(verdict === "positive" ? "active-pos" : "active-neg");
+      }
+    });
+  } catch (err) {
+    alert("Feedback fehlgeschlagen: " + (err.detail || "Unbekannter Fehler"));
+  } finally {
+    buttons.forEach((b) => (b.disabled = false));
+  }
 }
 
 function pollStatus(jobId) {

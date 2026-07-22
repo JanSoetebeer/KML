@@ -16,6 +16,14 @@ webscraper/SYS_AI_MODELS
 # Stray local artifacts
 response.json
 
+# Resolved IAM policy files generated from webscraper/aws/*.json templates
+# (they contain your real account id — only the placeholder templates are tracked).
+*.resolved.json
+
+# Local deploy / operational artifacts (not for the repo)
+env.json
+*.tgz
+
 # ML classifier: training data (large) + the regenerable extraction cache.
 # The trained model (*.joblib) IS committed — it's bundled into the Lambda image
 # at deploy time and is the artifact the scraper classifies with.
