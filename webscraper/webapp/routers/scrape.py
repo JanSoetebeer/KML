@@ -30,6 +30,7 @@ every run lives in ``Log.txt``.
 """
 
 import json
+import logging
 import os
 import subprocess
 import sys
@@ -56,6 +57,8 @@ from webscraper.utils.url_sources import (
 _RELEVANT_DECISIONS = ("automatic_positive", "needs_review")
 
 router = APIRouter(prefix="/api/scrape", tags=["scrape"])
+
+logger = logging.getLogger(__name__)
 
 # Project root (scrape.py -> routers -> webapp -> project root) holds Log.txt.
 # Overridable via LOG_FILE so it can live on a persistent volume in Docker.
@@ -665,6 +668,15 @@ class FeedbackIn(BaseModel):
     verdict: str
 
 
+class FeedbackItem(BaseModel):
+    index: int
+    verdict: str
+
+
+class FeedbackBatchIn(BaseModel):
+    items: list[FeedbackItem]
+
+
 def _feedback_path(job_id: str) -> Path:
     return _manifest_dir() / f"feedback_{job_id}.jsonl"
 
@@ -702,20 +714,27 @@ def _load_feedback(job_id: str) -> dict[int, dict]:
     return {}
 
 
-def _write_feedback(job_id: str, entries: dict[int, dict]) -> None:
-    """Persist the full verdict set locally and mirror it to S3 if enabled."""
+def _write_feedback(job_id: str, entries: dict[int, dict]) -> bool | None:
+    """
+    Persist the full verdict set locally and mirror it to S3 if enabled.
+
+    Returns the S3 mirror status: True (uploaded), False (upload failed — the
+    verdicts are only on the container's ephemeral disk and will not reach the
+    retrain), or None (S3 disabled, local-only is expected).
+    """
     path = _feedback_path(job_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     body = "".join(
         json.dumps(entries[i], ensure_ascii=False) + "\n" for i in sorted(entries)
     )
     path.write_text(body, encoding="utf-8")
-    _upload_feedback_to_s3(job_id, path)
+    return _upload_feedback_to_s3(job_id, path)
 
 
-def _upload_feedback_to_s3(job_id: str, path: Path) -> None:
+def _upload_feedback_to_s3(job_id: str, path: Path) -> bool | None:
+    """Mirror the feedback file to S3. True=ok, False=failed, None=S3 disabled."""
     if not (os.getenv("S3_ENABLED", "false").lower() == "true" and os.getenv("S3_BUCKET")):
-        return
+        return None
     region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
     try:
         import boto3
@@ -724,8 +743,36 @@ def _upload_feedback_to_s3(job_id: str, path: Path) -> None:
             str(path), os.getenv("S3_BUCKET"), _feedback_s3_key(job_id),
             ExtraArgs={"ContentType": "application/x-ndjson"},
         )
-    except Exception:  # noqa: BLE001 — a failed mirror must not fail the verdict
-        pass
+        return True
+    except Exception as exc:  # noqa: BLE001 — a failed mirror must not 500 the request
+        # Loud, not silent: the usual cause is the instance role missing
+        # s3:PutObject on the bucket, which would otherwise lose verdicts quietly.
+        logger.error(
+            "feedback S3 upload FAILED for job %s (verdicts saved locally only). "
+            "Check the webapp instance role has s3:PutObject on %s. Error: %s",
+            job_id, os.getenv("S3_BUCKET"), exc,
+        )
+        return False
+
+
+def _feedback_entry(index: int, job_id: str, verdict: str, doc: dict,
+                    user: dict, when: str) -> dict:
+    """Build a self-contained verdict record so retrain never re-joins the manifest."""
+    return {
+        "index": index,
+        "job_id": job_id,
+        "verdict": verdict,
+        "filename": doc.get("filename", ""),
+        "hostname": doc.get("hostname", ""),
+        "url": doc.get("url", ""),
+        "saved_path": doc.get("saved_path", ""),
+        "s3_key": doc.get("s3_key", ""),
+        "model_decision": doc.get("decision", ""),
+        "model_score": doc.get("module_handbook_score"),
+        "model_version": doc.get("model_version", ""),
+        "reviewer": user.get("username", ""),
+        "reviewed_at": when,
+    }
 
 
 @router.post("/feedback/{job_id}/{index}")
@@ -748,35 +795,69 @@ def submit_feedback(
         raise HTTPException(status_code=404, detail="Dokument nicht gefunden.")
     doc = entries[index]
 
-    # Store a self-contained record: the retrain step then never needs to
-    # re-join against the manifest to know the file's identity and true label.
-    entry = {
-        "index": index,
-        "job_id": job_id,
-        "verdict": verdict,
-        "filename": doc.get("filename", ""),
-        "hostname": doc.get("hostname", ""),
-        "url": doc.get("url", ""),
-        "saved_path": doc.get("saved_path", ""),
-        "s3_key": doc.get("s3_key", ""),
-        "model_decision": doc.get("decision", ""),
-        "model_score": doc.get("module_handbook_score"),
-        "model_version": doc.get("model_version", ""),
-        "reviewer": user.get("username", ""),
-        "reviewed_at": datetime.now(timezone.utc).isoformat(),
-    }
-
+    when = datetime.now(timezone.utc).isoformat()
     with _FEEDBACK_LOCK:
         current = _load_feedback(job_id)
-        current[index] = entry
-        _write_feedback(job_id, current)
+        current[index] = _feedback_entry(index, job_id, verdict, doc, user, when)
+        s3 = _write_feedback(job_id, current)
         reviewed = len(current)
 
     _append_log(
         [f"Feedback: {user.get('username', '?')} → {verdict} für "
          f"{doc.get('filename', '?')} (job={job_id}, #{index})"]
     )
-    return {"ok": True, "index": index, "verdict": verdict, "reviewed": reviewed}
+    return {"ok": True, "index": index, "verdict": verdict,
+            "reviewed": reviewed, "s3": s3}
+
+
+@router.post("/feedback/{job_id}")
+def submit_feedback_batch(
+    job_id: str,
+    body: FeedbackBatchIn,
+    user: dict = Depends(get_current_user),
+):
+    """
+    Record many verdicts in one shot (the "Prüfung abschließen" button).
+
+    A single local write + a single S3 upload for the whole batch, instead of one
+    per click. ``current = _load_feedback`` merges with anything already stored,
+    so a batch also re-uploads previously-saved verdicts — which is what recovers
+    them to S3 the first time the instance role is allowed to write.
+    """
+    if not body.items:
+        raise HTTPException(status_code=400, detail="Keine Verdicts übergeben.")
+
+    entries = _load_manifest(job_id)
+    if entries is None:
+        raise HTTPException(status_code=404, detail="Manifest nicht gefunden.")
+
+    # Validate everything up front so a bad item doesn't partially apply.
+    cleaned: list[tuple[int, str]] = []
+    for it in body.items:
+        v = (it.verdict or "").strip().lower()
+        if v not in _VERDICTS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ungültiges Verdict {it.verdict!r}; erlaubt: {', '.join(_VERDICTS)}.",
+            )
+        if not (0 <= it.index < len(entries)):
+            raise HTTPException(
+                status_code=404, detail=f"Dokument-Index {it.index} nicht gefunden.")
+        cleaned.append((it.index, v))
+
+    when = datetime.now(timezone.utc).isoformat()
+    with _FEEDBACK_LOCK:
+        current = _load_feedback(job_id)
+        for index, v in cleaned:
+            current[index] = _feedback_entry(index, job_id, v, entries[index], user, when)
+        s3 = _write_feedback(job_id, current)
+        reviewed = len(current)
+
+    _append_log(
+        [f"Feedback (Batch): {user.get('username', '?')} → {len(cleaned)} Verdict(s) "
+         f"für job={job_id} (S3={s3})"]
+    )
+    return {"ok": True, "saved": len(cleaned), "reviewed": reviewed, "s3": s3}
 
 
 @router.get("/log")

@@ -138,7 +138,7 @@ button.danger:hover { background: var(--danger-hover); }
 .tab-btn:hover { background: transparent; color: var(--text); }
 .tab-btn.active { color: var(--text); border-bottom-color: var(--primary); }
 
-.content { padding: 1.5rem; max-width: 1100px; margin: 0 auto; }
+.content { padding: 1.5rem; max-width: min(1600px, 95vw); margin: 0 auto; }
 .tab-panel { display: none; }
 .tab-panel.active { display: block; }
 
@@ -321,3 +321,14 @@ input[type="file"] { color: var(--muted); }
   color: #fecaca;
 }
 .verdict-hint { font-size: 0.72rem; color: var(--muted); margin-left: 0.15rem; }
+
+/* Batch "finish review" action bar under the results table */
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  flex-wrap: wrap;
+}
+.finish-btn { background: var(--ok); }
+.finish-btn:hover:not(:disabled) { background: #16a34a; }

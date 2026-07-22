@@ -5,6 +5,10 @@ import { api, apiForm, getToken } from "./api.js";
 // model, positive = Modulhandbuch. Only the button captions are MH-specific.
 const VERDICT_LABELS = { positive: "Modulhandbuch", negative: "Kein MH" };
 
+// Client-side review selection for the current run: { [manifestIndex]: verdict }.
+// Populated by clicks, flushed to the server in one batch by "Prüfung abschließen".
+let selectedVerdicts = {};
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -264,13 +268,22 @@ async function renderClassification(jobId) {
     `${c.automatic_positive || 0} Modulhandbuch, ${c.needs_review || 0} zu prüfen, ` +
     `${c.automatic_negative || 0} aussortiert · ` +
     `${c.reviewed || 0} geprüft</p>` +
-    `<p class="muted small">Prüfen Sie unsichere Dokumente per Download und bestätigen ` +
-    `Sie Modulhandbuch / Kein MH. Die Verdicts trainieren das Modell nach ` +
-    `(<code>python -m mlclassifier feedback-retrain</code>).</p>`;
+    `<p class="muted small">Dokumente per Download prüfen und Modulhandbuch / Kein MH ` +
+    `markieren, dann unten <strong>Prüfung abschließen</strong> klicken — alle ` +
+    `Markierungen werden gemeinsam gespeichert. Danach: ` +
+    `<code>python -m mlclassifier feedback-retrain --from-s3</code>.</p>`;
 
   if (data.relevant.length === 0) {
     box.innerHTML = summary + `<p class="muted">Keine relevanten Dokumente gefunden.</p>`;
     return;
+  }
+
+  // Client-side selection. Clicking a verdict only *marks* the row; nothing is
+  // sent until "Prüfung abschließen" writes the whole batch in one request.
+  // Seed from verdicts already stored so re-opening a run shows prior choices.
+  selectedVerdicts = {};
+  for (const r of data.relevant) {
+    if (r.verdict) selectedVerdicts[r.index] = r.verdict;
   }
 
   const rows = data.relevant
@@ -295,7 +308,10 @@ async function renderClassification(jobId) {
     `<div class="table-scroll"><table class="result-table">` +
     `<thead><tr><th>Datei</th><th>Klassifikation</th><th>Score</th><th>Quelle</th>` +
     `<th>Prüfung</th><th></th></tr></thead>` +
-    `<tbody>${rows}</tbody></table></div>`;
+    `<tbody>${rows}</tbody></table></div>` +
+    `<div class="review-actions">` +
+    `<button id="sc-finish-review" class="finish-btn"></button>` +
+    `<span id="sc-review-msg" class="muted small"></span></div>`;
 
   box.querySelectorAll(".dl-btn").forEach((btn) =>
     btn.addEventListener("click", () =>
@@ -303,47 +319,91 @@ async function renderClassification(jobId) {
     )
   );
   box.querySelectorAll(".verdict-btn").forEach((btn) =>
-    btn.addEventListener("click", () =>
-      submitVerdict(jobId, Number(btn.dataset.idx), btn.dataset.verdict, btn)
-    )
+    btn.addEventListener("click", () => selectVerdict(btn))
   );
+  document
+    .getElementById("sc-finish-review")
+    .addEventListener("click", () => finishReview(jobId));
+  updateFinishButton();
 }
 
-// Two verdict buttons for one row, highlighting whichever verdict is stored.
+// Two verdict buttons for one row, highlighting the current selection.
 function verdictButtons(r) {
+  const chosen = selectedVerdicts[r.index];
   const mk = (v) => {
-    const active = r.verdict === v ? ` active-${v === "positive" ? "pos" : "neg"}` : "";
+    const active = chosen === v ? ` active-${v === "positive" ? "pos" : "neg"}` : "";
     return (
       `<button class="verdict-btn${active}" data-idx="${r.index}" ` +
       `data-verdict="${v}">${escapeHtml(VERDICT_LABELS[v])}</button>`
     );
   };
-  const who = r.reviewed_by
-    ? `<span class="verdict-hint">von ${escapeHtml(r.reviewed_by)}</span>`
-    : "";
-  return mk("positive") + mk("negative") + who;
+  return mk("positive") + mk("negative");
 }
 
-async function submitVerdict(jobId, index, verdict, btn) {
+// Mark a row's verdict client-side (no network). Toggles off if re-clicked.
+function selectVerdict(btn) {
+  const idx = Number(btn.dataset.idx);
+  const verdict = btn.dataset.verdict;
   const cell = btn.closest(".verdict-cell");
-  const buttons = cell ? cell.querySelectorAll(".verdict-btn") : [btn];
-  buttons.forEach((b) => (b.disabled = true));
+  const buttons = cell.querySelectorAll(".verdict-btn");
+
+  if (selectedVerdicts[idx] === verdict) {
+    delete selectedVerdicts[idx]; // toggle off
+  } else {
+    selectedVerdicts[idx] = verdict;
+  }
+  buttons.forEach((b) => {
+    b.classList.remove("active-pos", "active-neg");
+    if (b.dataset.verdict === selectedVerdicts[idx]) {
+      b.classList.add(b.dataset.verdict === "positive" ? "active-pos" : "active-neg");
+    }
+  });
+  updateFinishButton();
+}
+
+function updateFinishButton() {
+  const btn = document.getElementById("sc-finish-review");
+  if (!btn) return;
+  const n = Object.keys(selectedVerdicts).length;
+  btn.textContent = `Prüfung abschließen (${n})`;
+  btn.disabled = n === 0;
+}
+
+// Send every selected verdict in a single request.
+async function finishReview(jobId) {
+  const items = Object.entries(selectedVerdicts).map(([index, verdict]) => ({
+    index: Number(index),
+    verdict,
+  }));
+  if (items.length === 0) return;
+
+  const btn = document.getElementById("sc-finish-review");
+  const msg = document.getElementById("sc-review-msg");
+  btn.disabled = true;
+  btn.textContent = "Speichern…";
   try {
-    await api(`/api/scrape/feedback/${jobId}/${index}`, {
+    const res = await api(`/api/scrape/feedback/${jobId}`, {
       method: "POST",
-      body: { verdict },
+      body: { items },
     });
-    // Reflect the stored verdict without a full reload.
-    buttons.forEach((b) => {
-      b.classList.remove("active-pos", "active-neg");
-      if (b.dataset.verdict === verdict) {
-        b.classList.add(verdict === "positive" ? "active-pos" : "active-neg");
-      }
-    });
+    if (res.s3 === false) {
+      // Saved in the container but the S3 mirror failed — these won't reach the
+      // retrain. Surface it loudly instead of pretending it worked.
+      msg.className = "err small";
+      msg.textContent =
+        `${res.saved} gespeichert, aber S3-Upload fehlgeschlagen — ` +
+        `Instanz-Rolle braucht s3:PutObject. Verdicts erreichen das Training noch nicht.`;
+    } else {
+      msg.className = "muted small";
+      msg.textContent = `${res.saved} Verdict(s) gespeichert${
+        res.s3 === true ? " (in S3)" : ""
+      }. Retrain mit: python -m mlclassifier feedback-retrain --from-s3`;
+    }
+    await renderClassification(jobId); // refresh counts + persisted state
   } catch (err) {
-    alert("Feedback fehlgeschlagen: " + (err.detail || "Unbekannter Fehler"));
-  } finally {
-    buttons.forEach((b) => (b.disabled = false));
+    msg.className = "err small";
+    msg.textContent = "Speichern fehlgeschlagen: " + (err.detail || "Unbekannter Fehler");
+    updateFinishButton();
   }
 }
 

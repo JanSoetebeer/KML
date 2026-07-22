@@ -12,12 +12,28 @@ band can feed active learning (spec §13, §14).
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path
 
 from . import config
 from .extraction import STATUS_OK, extract_document, extract_document_bytes
 from .features import records_to_frame
 from .pipeline import load_model
+
+logger = logging.getLogger(__name__)
+
+
+def _env_float(name: str, default: float) -> float:
+    """Read an optional float override from the environment; keep *default* if unset/invalid."""
+    raw = os.getenv(name)
+    if raw is None or raw.strip() == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        logger.warning("ignoring invalid %s=%r (not a number)", name, raw)
+        return default
 
 
 class Classifier:
@@ -27,8 +43,25 @@ class Classifier:
         self.estimator = estimator
         self.metadata = metadata
         self._pos_col = list(estimator.named_steps["clf"].classes_).index(1)
-        self.lower = float(metadata.get("lower_threshold", config.DEFAULT_LOWER_THRESHOLD))
-        self.upper = float(metadata.get("upper_threshold", config.DEFAULT_UPPER_THRESHOLD))
+        # Thresholds come from the trained artifact, but can be overridden per
+        # deployment via env vars (e.g. CLASSIFIER_LOWER_THRESHOLD=0.6 to send
+        # everything below 0.6 straight to automatic_negative and shrink the
+        # review band). Overriding beats retraining for this: it's instant,
+        # reversible, and survives future retrains. Trade-off: a higher lower
+        # threshold risks auto-discarding a true positive that scores in the
+        # gap — raise it only when review has shown that band is reliably negative.
+        meta_lower = float(metadata.get("lower_threshold", config.DEFAULT_LOWER_THRESHOLD))
+        meta_upper = float(metadata.get("upper_threshold", config.DEFAULT_UPPER_THRESHOLD))
+        self.lower = _env_float("CLASSIFIER_LOWER_THRESHOLD", meta_lower)
+        self.upper = _env_float("CLASSIFIER_UPPER_THRESHOLD", meta_upper)
+        # Keep the band well-formed: never let the negative cut sit above the
+        # positive cut (that would erase the review band and make decisions ambiguous).
+        if self.lower > self.upper:
+            logger.warning(
+                "lower threshold %.3f > upper %.3f; clamping lower to upper",
+                self.lower, self.upper,
+            )
+            self.lower = self.upper
 
     # -- scoring ---------------------------------------------------------------
 
