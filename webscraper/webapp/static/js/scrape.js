@@ -268,10 +268,11 @@ async function renderClassification(jobId) {
     `${c.automatic_positive || 0} Modulhandbuch, ${c.needs_review || 0} zu prüfen, ` +
     `${c.automatic_negative || 0} aussortiert · ` +
     `${c.reviewed || 0} geprüft</p>` +
-    `<p class="muted small">Dokumente per Download prüfen und Modulhandbuch / Kein MH ` +
-    `markieren, dann unten <strong>Prüfung abschließen</strong> klicken — alle ` +
-    `Markierungen werden gemeinsam gespeichert. Danach: ` +
-    `<code>python -m mlclassifier feedback-retrain --from-s3</code>.</p>`;
+    `<p class="muted small">Sichere Treffer (${c.automatic_positive || 0} „Modulhandbuch") ` +
+    `sind bereits als positiv vorgewählt — nur Fehler korrigieren. ` +
+    `„Zu prüfen"-Dokumente per Download prüfen und markieren, dann unten ` +
+    `<strong>Prüfung abschließen</strong> klicken (speichert alle Markierungen ` +
+    `gemeinsam). Danach: <code>python -m mlclassifier feedback-retrain --from-s3</code>.</p>`;
 
   if (data.relevant.length === 0) {
     box.innerHTML = summary + `<p class="muted">Keine relevanten Dokumente gefunden.</p>`;
@@ -280,10 +281,18 @@ async function renderClassification(jobId) {
 
   // Client-side selection. Clicking a verdict only *marks* the row; nothing is
   // sent until "Prüfung abschließen" writes the whole batch in one request.
-  // Seed from verdicts already stored so re-opening a run shows prior choices.
+  // Seeding priority per row:
+  //   1. a verdict already stored (re-opening a run shows prior choices), else
+  //   2. pre-mark confident automatic_positive rows as positive, so you only
+  //      override the model's mistakes instead of confirming every 0.85+ by hand.
+  //      (Nothing is saved until you click "Prüfung abschließen".)
   selectedVerdicts = {};
   for (const r of data.relevant) {
-    if (r.verdict) selectedVerdicts[r.index] = r.verdict;
+    if (r.verdict) {
+      selectedVerdicts[r.index] = r.verdict;
+    } else if (r.decision === "automatic_positive") {
+      selectedVerdicts[r.index] = "positive";
+    }
   }
 
   const rows = data.relevant
