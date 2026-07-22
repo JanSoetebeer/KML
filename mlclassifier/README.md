@@ -3,7 +3,6 @@
 Binary document classifier for the webscraper: decides whether a downloaded file
 is a **Modulhandbuch** (`1`) or **not** (`0`).
 
-
 This is the TF-IDF + linear baseline recommended as the first productive stand:
 fast, interpretable, cheap, and — crucially — easy to evaluate honestly. It is a
 **standalone package**, decoupled from Scrapy, so it can be trained and tested on
