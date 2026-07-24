@@ -24,6 +24,7 @@ Profiles that steer the crawl by keyword can subclass
 :class:`KeywordScoredProfile` and just declare token → weight maps.
 """
 
+import hashlib
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -31,6 +32,33 @@ from webscraper.items import DocumentItem
 
 # Neutral default: harvest common document types with no keyword bias.
 DEFAULT_TARGET_EXTENSIONS = frozenset({".pdf", ".doc", ".docx"})
+
+# Document extension → Content-Type, so a link that resolves to a document but
+# has no usable extension in its URL (a script-served download such as
+# ``…/show_document.asp?id=…`` or ``download.php?id=…``) is still recognised by
+# the response's Content-Type. The reverse map drives that lookup.
+_EXT_MIME = {
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".xls": "application/vnd.ms-excel",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".ppt": "application/vnd.ms-powerpoint",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".odt": "application/vnd.oasis.opendocument.text",
+    ".rtf": "application/rtf",
+}
+_MIME_EXT = {mime: ext for ext, mime in _EXT_MIME.items()}
+_MIME_EXT.update({"text/rtf": ".rtf", "application/x-pdf": ".pdf"})
+
+
+def _ext_from_content_type(response) -> str:
+    """Map a response's Content-Type to a document extension (e.g. ``.pdf``), or ``""``."""
+    ctype = response.headers.get("Content-Type", b"")
+    if isinstance(ctype, (bytes, bytearray)):
+        ctype = ctype.decode("latin-1", "ignore")
+    ctype = ctype.split(";")[0].strip().lower()
+    return _MIME_EXT.get(ctype, "")
 
 # Umlaut / ß folding so German anchor text ("Modulhandbücher",
 # "Prüfungsordnung") matches ASCII keyword tokens.
@@ -88,6 +116,18 @@ class ExtractionProfile:
         path = urlparse(url).path.lower()
         return any(path.endswith(ext) for ext in self.target_extensions)
 
+    def is_target_response(self, response) -> bool:
+        """
+        True if a *fetched* response is a target document, judged by its
+        Content-Type. Catches documents whose URL has no usable extension — a
+        script-served download like ``…/show_document.asp?id=…`` — which
+        ``is_target`` (URL-only) cannot see until the response is in hand.
+        """
+        if not self.target_extensions:
+            return False
+        ext = _ext_from_content_type(response)
+        return bool(ext) and ext in self.target_extensions
+
     # -- extraction ------------------------------------------------------------
 
     def extract_target(self, response, source_page: str, spider):
@@ -98,6 +138,17 @@ class ExtractionProfile:
         url = response.url
         filename = urlparse(url).path.split("/")[-1] or "unknown"
         extension = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        # Script-served document (URL has no document extension): infer the type
+        # from the Content-Type and give it a collision-free filename — such URLs
+        # share a path (…/show_document.asp) and differ only by query string, so a
+        # bare basename would overwrite in S3/on disk.
+        if extension not in self.target_extensions:
+            inferred = _ext_from_content_type(response)
+            if inferred:
+                stem = (filename.rsplit(".", 1)[0] if "." in filename else filename) or "document"
+                digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:8]
+                filename = f"{stem}-{digest}{inferred}"
+                extension = inferred
         content = response.body
         yield DocumentItem(
             url=url,

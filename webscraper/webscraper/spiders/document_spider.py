@@ -221,9 +221,17 @@ class DocumentSpider(BaseSpider):
             priority=55, dont_filter=True,
         )
 
-    def parse(self, response, depth: int = 0, **kwargs):
+    def parse(self, response, depth: int = 0, source_page: str = None, **kwargs):
         """Parse a page: extract from it, fetch target resources, follow links."""
         self._init_limits()
+        # A followed link may resolve to a *document* rather than a page — e.g. a
+        # script-served PDF with no ".pdf" in its URL (…/show_document.asp?id=…).
+        # Detect it by Content-Type and extract it instead of dropping it as a
+        # non-HTML page. Not charged against the page budget (it's not a page).
+        if self.profile.is_target_response(response):
+            self.crawler.stats.inc_value("webscraper/files_found")
+            yield from self._fetch_target(response, source_page or response.url)
+            return
         # Best-first scheduling can queue more pages than the budget allows;
         # drop any that arrive once the budget is spent (target fetches still
         # flow through _fetch_target, which is unaffected by the page budget).
@@ -310,7 +318,7 @@ class DocumentSpider(BaseSpider):
             yield scrapy.Request(
                 url=link,
                 callback=self.parse,
-                cb_kwargs={"depth": next_depth},
+                cb_kwargs={"depth": next_depth, "source_page": page_url},
                 priority=priority,
                 errback=self._on_error,
             )
