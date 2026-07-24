@@ -37,17 +37,22 @@ on:
       max_pages:
         description: "CRAWL_MAX_PAGES per university"
         required: false
-        default: "300"
+        default: "800"
+        type: string
+      subdomain_sitemaps:
+        description: "Max faculty subdomains discovered per uni (CRAWL_MAX_SUBDOMAIN_SITEMAPS)"
+        required: false
+        default: "30"
         type: string
       cpu:
         description: "Task vCPU units (1024 = 1 vCPU)"
         required: false
-        default: "2048"
+        default: "4096"
         type: string
       memory:
         description: "Task memory (MiB)"
         required: false
-        default: "8192"
+        default: "16384"
         type: string
       force:
         description: "Re-crawl URLs even if already in the visited store (BULK_FORCE)"
@@ -132,6 +137,7 @@ jobs:
                   { "name": "MAX_CONCURRENT_JOBS", "value": "${{ inputs.max_jobs }}" },
                   { "name": "CRAWL_MAX_DEPTH","value": "${{ inputs.max_depth }}" },
                   { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" },
+                  { "name": "CRAWL_MAX_SUBDOMAIN_SITEMAPS","value": "${{ inputs.subdomain_sitemaps }}" },
                   { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" }
                 ]
               }

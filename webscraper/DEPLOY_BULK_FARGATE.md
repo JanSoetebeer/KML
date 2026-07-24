@@ -209,24 +209,27 @@ to configure bulk).
 ## Cost & time estimate
 
 **Fargate pricing** (eu-central-1, Linux/x86): **$0.04456 / vCPU-hour** +
-**$0.004865 / GB-hour**. The default task is **2 vCPU + 8 GB** ≈ **$0.13 / hour**
+**$0.004865 / GB-hour**. The default task is **4 vCPU + 16 GB** ≈ **$0.26 / hour**
 (ephemeral storage: first 20 GB free, so ~0). Billed per second while the task
 runs; **nothing when idle** (no always-on cost, unlike the EC2 stopgap).
 
 Throughput is governed by **politeness**, not CPU: `DOWNLOAD_DELAY=0.4s`,
 2 requests/domain, 8 universities in parallel (`CONCURRENT_REQUESTS=16`). Rough
-figures with the focused (best-first) crawl at `CRAWL_MAX_PAGES=300`:
+figures at the default `CRAWL_MAX_PAGES=800` (deeper = higher recall on big
+multi-faculty unis, but longer per uni):
 
 | Harvest | Wall-clock | Fargate cost |
 |---|---|---|
-| ~30 universities | ~20–40 min | **< $0.10** |
-| ~150 universities (your `hs_liste`) | **~1–2 hours** | **~$0.15–0.30** |
-| ~400 German universities | ~2–4 hours | **well under $1** |
-| One very deep single site (`CRAWL_MAX_PAGES=1000`) | ~15–40 min | a few cents |
+| ~30 universities | ~40–70 min | **~$0.20–0.30** |
+| ~150 universities (your `hs_liste`) | **~3–5 hours** | **~$0.80–1.30** |
+| ~400 German universities | ~6–10 hours | **~$2–3** |
+| One very deep single site | ~30–60 min | a few cents |
 
-Non-compute costs are negligible: S3 `PUT` ≈ $0.005 per 1,000 files, transient
-storage a few GB at $0.023/GB-month, DynamoDB on-demand a few hundred writes.
-**A full national harvest costs under a euro and finishes in an afternoon.**
+Lower `CRAWL_MAX_PAGES` (e.g. back to 300) roughly halves both columns at the
+cost of recall on the biggest unis; **shard** (below) to cut wall-clock without
+raising cost. Non-compute costs stay negligible: S3 `PUT` ≈ $0.005 per 1,000
+files, transient storage a few GB at $0.023/GB-month, DynamoDB on-demand writes.
+**A full national harvest is a few euros and runs in a workday.**
 
 Cheaper/faster than the alternatives for this workload: hundreds of 15-min Lambda
 invocations would cost more compute and still cap each uni at 15 min; a
@@ -248,13 +251,14 @@ limits comfortably allow a handful of concurrent tasks.
 | Var | Default | Effect |
 |---|---|---|
 | `CRAWL_MAX_DEPTH` | 3 | how deep same-subdomain link-following goes |
-| `CRAWL_MAX_PAGES` | 300 | page budget per university (best-first spends it well) |
+| `CRAWL_MAX_PAGES` | 800 | page budget per university (best-first spends it well) |
+| `CRAWL_MAX_SUBDOMAIN_SITEMAPS` | 30 | max faculty subdomains discovered per uni |
 | `BULK_MAX_JOBS` | 8 | universities crawled concurrently |
 | `CONCURRENT_REQUESTS` | 16 | global in-flight request cap (≈ 2 × BULK_MAX_JOBS) |
 | `DOWNLOAD_DELAY` | 0.4 | politeness delay per domain (raise to be gentler) |
 | `CRAWL_PROFILE` | modulhandbuch | extraction profile (also: generic, html-content) |
 | `MAX_ITEMS_PER_RUN` | 0 | per-run download cap; 0 = unlimited (bulk) |
 
-Raise CPU/memory (`cpu`/`memory` workflow inputs) only if you raise
-`BULK_MAX_JOBS` a lot — the workload is I/O-bound, so 2 vCPU handles 8 parallel
-crawls comfortably.
+The default task is **4 vCPU + 16 GB** — headroom for the higher page budget and
+in-RAM PDF buffering across 8 parallel crawls. The workload is I/O-bound, so you
+only need more if you raise `BULK_MAX_JOBS` well past 8.

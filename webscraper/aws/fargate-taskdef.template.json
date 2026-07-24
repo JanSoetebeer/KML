@@ -2,8 +2,8 @@
   "family": "webscraper-bulk",
   "requiresCompatibilities": ["FARGATE"],
   "networkMode": "awsvpc",
-  "cpu": "2048",
-  "memory": "8192",
+  "cpu": "4096",
+  "memory": "16384",
   "runtimePlatform": {
     "cpuArchitecture": "X86_64",
     "operatingSystemFamily": "LINUX"
@@ -32,7 +32,8 @@
 
         { "name": "DOWNLOAD_DELAY", "value": "0.4" },
         { "name": "CRAWL_MAX_DEPTH", "value": "3" },
-        { "name": "CRAWL_MAX_PAGES", "value": "300" },
+        { "name": "CRAWL_MAX_PAGES", "value": "800" },
+        { "name": "CRAWL_MAX_SUBDOMAIN_SITEMAPS", "value": "30" },
         { "name": "MAX_ITEMS_PER_RUN", "value": "0" },
         { "name": "MAX_CONCURRENT_JOBS", "value": "8" },
         { "name": "BULK_MAX_JOBS", "value": "8" },
