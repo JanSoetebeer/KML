@@ -1,0 +1,149 @@
+name: Bulk crawl (Fargate)
+
+# On-demand bulk harvest on AWS Fargate — the no-15-min-limit path for deep or
+# many-university crawls. Reuses the SAME container image the Lambda runs (built
+# by deploy-lambda.yml), overriding the entrypoint to `python bulk_run.py`.
+#
+# Launch it from the Actions tab (Run workflow) with a URL list already uploaded
+# to S3. The task writes scraped files + the classification manifest to the same
+# S3 bucket the webapp reads, so results show up in the existing review UI.
+#
+# One-time AWS setup (cluster, IAM roles, log group, network) is in
+# webscraper/DEPLOY_BULK_FARGATE.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls_s3:
+        description: "s3:// URI of the URL list (.csv/.txt/.html) to crawl"
+        required: true
+        type: string
+      profile:
+        description: "Extraction profile"
+        required: true
+        default: "modulhandbuch"
+        type: choice
+        options: [modulhandbuch, generic, html-content]
+      max_jobs:
+        description: "Concurrent per-university crawls"
+        required: false
+        default: "8"
+        type: string
+      max_depth:
+        description: "CRAWL_MAX_DEPTH"
+        required: false
+        default: "3"
+        type: string
+      max_pages:
+        description: "CRAWL_MAX_PAGES per university"
+        required: false
+        default: "300"
+        type: string
+      cpu:
+        description: "Task vCPU units (1024 = 1 vCPU)"
+        required: false
+        default: "2048"
+        type: string
+      memory:
+        description: "Task memory (MiB)"
+        required: false
+        default: "8192"
+        type: string
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: eu-central-1
+  ECS_CLUSTER: webscraper-bulk
+  TASK_FAMILY: webscraper-bulk
+
+concurrency:
+  group: bulk-crawl
+  cancel-in-progress: false
+
+jobs:
+  launch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Register task definition (latest image)
+        run: |
+          set -euo pipefail
+          ACCOUNT=$(aws sts get-caller-identity --query Account --output text)
+          sed -e "s/ACCOUNT_ID/$ACCOUNT/g" -e "s/REGION/$AWS_REGION/g" \
+            webscraper/aws/fargate-taskdef.template.json > taskdef.json
+          # Apply the per-launch CPU/memory overrides.
+          jq --arg cpu "${{ inputs.cpu }}" --arg mem "${{ inputs.memory }}" \
+             '.cpu=$cpu | .memory=$mem' taskdef.json > taskdef.final.json
+          aws ecs register-task-definition \
+            --cli-input-json file://taskdef.final.json \
+            --region "$AWS_REGION" >/dev/null
+          echo "Registered task definition $TASK_FAMILY"
+
+      - name: Resolve network (default VPC subnets + bulk SG)
+        run: |
+          set -euo pipefail
+          # Subnets: repo var FARGATE_SUBNETS (comma-separated) or auto-discover
+          # the default VPC's subnets.
+          SUBNETS="${{ vars.FARGATE_SUBNETS }}"
+          if [ -z "$SUBNETS" ]; then
+            VPC=$(aws ec2 describe-vpcs --filters Name=isDefault,Values=true \
+              --query "Vpcs[0].VpcId" --output text --region "$AWS_REGION")
+            SUBNETS=$(aws ec2 describe-subnets --filters Name=vpc-id,Values=$VPC \
+              --query "Subnets[].SubnetId" --output text --region "$AWS_REGION" | tr '\t' ',')
+          fi
+          SG="${{ vars.FARGATE_SECURITY_GROUP }}"
+          if [ -z "$SG" ]; then
+            echo "::error::Set repo variable FARGATE_SECURITY_GROUP (an egress-enabled SG). See DEPLOY_BULK_FARGATE.md."
+            exit 1
+          fi
+          echo "SUBNETS=$SUBNETS" >> "$GITHUB_ENV"
+          echo "SG=$SG" >> "$GITHUB_ENV"
+
+      - name: Run the bulk crawl task
+        run: |
+          set -euo pipefail
+          BATCH_ID=$(python -c "import uuid;print(uuid.uuid4().hex)")
+          cat > overrides.json <<JSON
+          {
+            "containerOverrides": [
+              {
+                "name": "webscraper-bulk",
+                "environment": [
+                  { "name": "BULK_URLS_S3",   "value": "${{ inputs.urls_s3 }}" },
+                  { "name": "BULK_BATCH_ID",  "value": "$BATCH_ID" },
+                  { "name": "CRAWL_PROFILE",  "value": "${{ inputs.profile }}" },
+                  { "name": "BULK_MAX_JOBS",  "value": "${{ inputs.max_jobs }}" },
+                  { "name": "MAX_CONCURRENT_JOBS", "value": "${{ inputs.max_jobs }}" },
+                  { "name": "CRAWL_MAX_DEPTH","value": "${{ inputs.max_depth }}" },
+                  { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" }
+                ]
+              }
+            ]
+          }
+          JSON
+
+          NETCFG="awsvpcConfiguration={subnets=[$SUBNETS],securityGroups=[$SG],assignPublicIp=ENABLED}"
+          ARN=$(aws ecs run-task \
+            --cluster "$ECS_CLUSTER" \
+            --task-definition "$TASK_FAMILY" \
+            --launch-type FARGATE \
+            --count 1 \
+            --network-configuration "$NETCFG" \
+            --overrides file://overrides.json \
+            --started-by "gha-${{ github.run_id }}" \
+            --query "tasks[0].taskArn" --output text --region "$AWS_REGION")
+          echo "Launched task: $ARN"
+          echo "Batch id (manifest key): $BATCH_ID"
+          echo "Results will land at s3://webscraper-output-<account>/manifests/$BATCH_ID.jsonl"
+          echo "Watch logs: aws logs tail /ecs/webscraper-bulk --follow --region $AWS_REGION"

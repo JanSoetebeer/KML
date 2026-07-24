@@ -332,3 +332,19 @@ input[type="file"] { color: var(--muted); }
 }
 .finish-btn { background: var(--ok); }
 .finish-btn:hover:not(:disabled) { background: #16a34a; }
+
+/* Recent-runs list (re-open a past run's review after reload). */
+#sc-recent { display: flex; flex-direction: column; gap: 0.4rem; }
+.recent-run {
+  display: block;
+  width: 100%;
+  text-align: left;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius, 6px);
+  padding: 0.5rem 0.75rem;
+  cursor: pointer;
+}
+.recent-run:hover { border-color: var(--primary); }
+.recent-run code { font-size: 0.9em; }

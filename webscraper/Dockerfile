@@ -15,8 +15,10 @@ FROM public.ecr.aws/lambda/python:3.12
 COPY webscraper/requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
-# 2. Scraper application code.
-COPY webscraper/run.py webscraper/lambda_handler.py webscraper/scrapy.cfg ${LAMBDA_TASK_ROOT}/
+# 2. Scraper application code. bulk_run.py is the Fargate/ECS bulk entrypoint —
+#    the ECS task definition overrides the container entrypoint to
+#    `python bulk_run.py`, bypassing the Lambda runtime interface below.
+COPY webscraper/run.py webscraper/bulk_run.py webscraper/lambda_handler.py webscraper/scrapy.cfg ${LAMBDA_TASK_ROOT}/
 COPY webscraper/webscraper/ ${LAMBDA_TASK_ROOT}/webscraper/
 
 # 3. Classifier package + trained model. Placed under LAMBDA_TASK_ROOT (which is

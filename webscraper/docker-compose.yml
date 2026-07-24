@@ -31,6 +31,14 @@ services:
       # relevant documents for download (the Lambda writes both to this bucket).
       S3_ENABLED: ${S3_ENABLED:-false}
       S3_BUCKET: ${S3_BUCKET:-}
+      # Fargate bulk backend for large URL lists (auto-routed when a run has more
+      # than BULK_URL_THRESHOLD URLs and FARGATE_SECURITY_GROUP is set). See
+      # DEPLOY_BULK_FARGATE.md. Unset → large lists fall back to Lambda.
+      FARGATE_SECURITY_GROUP: ${FARGATE_SECURITY_GROUP:-}
+      FARGATE_SUBNETS: ${FARGATE_SUBNETS:-}
+      ECS_CLUSTER: ${ECS_CLUSTER:-webscraper-bulk}
+      ECS_TASK_FAMILY: ${ECS_TASK_FAMILY:-webscraper-bulk}
+      BULK_URL_THRESHOLD: ${BULK_URL_THRESHOLD:-10}
       # Persistent paths inside the mounted volume.
       APP_DB_PATH: /data/app.db
       LOG_FILE: /data/Log.txt

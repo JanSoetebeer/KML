@@ -14,11 +14,18 @@ Each run executes in a background thread so the HTTP request stays short —
 otherwise slow (image/media-heavy) runs would die on a browser / proxy
 timeout, which is what made non-PDF / multi-type scrapes look like they hung.
 
-The thread dispatches the work to one of two backends:
+The thread dispatches the work to one of three backends, chosen by URL count
+(``_choose_backend``):
 
-- **AWS Lambda** when ``LAMBDA_FUNCTION_NAME`` is set (production). The call
-  uses boto3; set the region via ``AWS_REGION`` / ``AWS_DEFAULT_REGION`` and let
-  credentials come from the standard AWS chain (instance role in EC2).
+- **AWS Fargate bulk** when the run has more than ``BULK_URL_THRESHOLD`` URLs and
+  the bulk backend is configured (``FARGATE_SECURITY_GROUP`` + ``S3_BUCKET``).
+  A single URL still goes to Lambda; a large uploaded CSV/list is dispatched to
+  the on-demand ECS task (no 15-min limit). The list is uploaded to S3 and the
+  task keyed by this ``job_id``; it runs in the background, so results appear
+  under the same job id once it finishes. See ``webscraper/DEPLOY_BULK_FARGATE.md``.
+- **AWS Lambda** when ``LAMBDA_FUNCTION_NAME`` is set (production, small runs).
+  The call uses boto3; set the region via ``AWS_REGION`` / ``AWS_DEFAULT_REGION``
+  and let credentials come from the standard AWS chain (instance role in EC2).
 - **Local subprocess** (``python run.py …``) otherwise, so a full repo checkout
   can scrape without a deployed Lambda (dev / demo).
 
@@ -302,6 +309,128 @@ def _run_scrape(payload: dict) -> tuple[bool, str, dict | None]:
     return _run_local(payload)
 
 
+# ---------------------------------------------------------------------------
+# Backend routing: small runs → Lambda (fast, synchronous); large lists →
+# Fargate bulk (no 15-min limit). A run with more than BULK_URL_THRESHOLD URLs
+# is dispatched to the on-demand ECS task (webscraper/DEPLOY_BULK_FARGATE.md),
+# which reads the URL list from S3 and writes results to the same bucket keyed
+# by this job_id — so the existing results view surfaces them once it finishes.
+# ---------------------------------------------------------------------------
+
+def _bulk_threshold() -> int:
+    try:
+        return int(os.getenv("BULK_URL_THRESHOLD", "10"))
+    except ValueError:
+        return 10
+
+
+def _bulk_available() -> bool:
+    """True when the Fargate bulk backend is configured (SG + bucket present)."""
+    return bool(os.getenv("FARGATE_SECURITY_GROUP") and os.getenv("S3_BUCKET"))
+
+
+def _choose_backend(n_urls: int) -> str:
+    """Pick the execution backend for a run of *n_urls* URLs."""
+    if n_urls > _bulk_threshold() and _bulk_available():
+        return "bulk"
+    if os.getenv("LAMBDA_FUNCTION_NAME"):
+        return "lambda"
+    return "local"
+
+
+def _fargate_subnets(region: str) -> list[str]:
+    """Subnets for the task: FARGATE_SUBNETS, else the default VPC's subnets."""
+    env = os.getenv("FARGATE_SUBNETS", "").strip()
+    if env:
+        return [s.strip() for s in env.split(",") if s.strip()]
+    import boto3
+
+    ec2 = boto3.client("ec2", region_name=region)
+    vpcs = ec2.describe_vpcs(Filters=[{"Name": "isDefault", "Values": ["true"]}])
+    if not vpcs.get("Vpcs"):
+        return []
+    vpc_id = vpcs["Vpcs"][0]["VpcId"]
+    subs = ec2.describe_subnets(Filters=[{"Name": "vpc-id", "Values": [vpc_id]}])
+    return [s["SubnetId"] for s in subs.get("Subnets", [])]
+
+
+def _dispatch_bulk(
+    job_id: str, urls: list[str], file_types: list[str], profile: str | None = None
+) -> tuple[bool, str, dict | None]:
+    """
+    Launch a Fargate bulk crawl for *urls*.
+
+    Uploads the URL list to ``s3://<bucket>/lists/<job_id>.txt`` and runs the
+    ``webscraper-bulk`` ECS task with ``BULK_URLS_S3`` pointing at it and
+    ``BULK_BATCH_ID=job_id`` (so the manifest lands at ``manifests/<job_id>``).
+    Returns immediately — the crawl runs in the background — so ``summary`` is
+    ``None``; results appear under this job id once the task finishes.
+    """
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION", "eu-central-1")
+    bucket = os.getenv("S3_BUCKET")
+    sg = os.getenv("FARGATE_SECURITY_GROUP")
+    cluster = os.getenv("ECS_CLUSTER", "webscraper-bulk")
+    family = os.getenv("ECS_TASK_FAMILY", "webscraper-bulk")
+    if not bucket:
+        return False, "S3_BUCKET nicht gesetzt — Bulk-Crawl benötigt S3.", None
+    if not sg:
+        return False, "FARGATE_SECURITY_GROUP nicht gesetzt — Bulk-Backend nicht konfiguriert.", None
+
+    try:
+        import boto3
+
+        key = f"lists/{job_id}.txt"
+        boto3.client("s3", region_name=region).put_object(
+            Bucket=bucket, Key=key,
+            Body=("\n".join(urls)).encode("utf-8"),
+            ContentType="text/plain",
+        )
+        urls_s3 = f"s3://{bucket}/{key}"
+
+        subnets = _fargate_subnets(region)
+        if not subnets:
+            return False, "Keine Fargate-Subnetze gefunden (FARGATE_SUBNETS setzen).", None
+
+        env = [
+            {"name": "BULK_URLS_S3", "value": urls_s3},
+            {"name": "BULK_BATCH_ID", "value": job_id},
+        ]
+        if profile:
+            env.append({"name": "CRAWL_PROFILE", "value": profile})
+        if file_types:
+            env.append({"name": "FILE_TYPES", "value": ",".join(file_types)})
+
+        resp = boto3.client("ecs", region_name=region).run_task(
+            cluster=cluster,
+            taskDefinition=family,
+            launchType="FARGATE",
+            count=1,
+            networkConfiguration={
+                "awsvpcConfiguration": {
+                    "subnets": subnets,
+                    "securityGroups": [sg],
+                    "assignPublicIp": "ENABLED",
+                }
+            },
+            overrides={"containerOverrides": [
+                {"name": "webscraper-bulk", "environment": env}
+            ]},
+            startedBy=f"webapp-{job_id[:8]}",
+        )
+        failures = resp.get("failures") or []
+        if failures:
+            return False, f"Fargate run-task fehlgeschlagen: {failures}", None
+        tasks = resp.get("tasks") or []
+        task_short = tasks[0]["taskArn"].rsplit("/", 1)[-1] if tasks else "?"
+        return True, (
+            f"Bulk-Crawl auf AWS Fargate gestartet ({len(urls)} URLs, task={task_short}). "
+            f"Läuft im Hintergrund; Ergebnisse erscheinen unter dieser Job-ID, "
+            f"sobald der Lauf abgeschlossen ist (Seite später neu laden)."
+        ), None
+    except Exception as exc:  # noqa: BLE001 — surface any AWS error to the run log
+        return False, f"Bulk-Dispatch fehlgeschlagen: {exc}", None
+
+
 def _prune_jobs() -> None:
     """Keep the in-memory registry bounded (call while holding _JOBS_LOCK)."""
     if len(_JOBS) <= _MAX_JOBS_KEPT:
@@ -326,6 +455,7 @@ def _execute_scrape(
     """Background worker: run the scrape and record its outcome + log lines."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     payload = {"urls": urls, "file_types": selected, "job_id": job_id}
+    backend = _choose_backend(len(urls))
 
     _append_log(
         [
@@ -333,12 +463,16 @@ def _execute_scrape(
             f"Benutzer: {username} ({position})",
             f"KI-Modell: {model_label}",
             f"Dateiformate: {', '.join(selected)}",
+            f"Backend: {backend} ({len(urls)} URL(s), Schwelle {_bulk_threshold()})",
             f"URLs ({len(urls)}): {', '.join(urls)}",
             "Starte Scrape…",
         ]
     )
 
-    ok, detail, summary = _run_scrape(payload)
+    if backend == "bulk":
+        ok, detail, summary = _dispatch_bulk(job_id, urls, selected)
+    else:
+        ok, detail, summary = _run_scrape(payload)
 
     log_lines = [detail]
     if summary:
@@ -362,6 +496,7 @@ def _execute_scrape(
                 ok=ok,
                 detail=detail,
                 summary=summary,
+                backend=backend,
                 finished_at=time.time(),
             )
 
@@ -453,6 +588,7 @@ def start_scrape(
             "urls": urls,
             "file_types": selected,
             "model_label": model_label,
+            "backend": _choose_backend(len(urls)),
         }
         _prune_jobs()
 
@@ -483,6 +619,7 @@ def _job_view(job: dict) -> dict:
         "urls": job["urls"],
         "file_types": job["file_types"],
         "model_label": job["model_label"],
+        "backend": job.get("backend"),
         "elapsed_seconds": round(max(0.0, end - job["started_at"]), 1),
     }
 

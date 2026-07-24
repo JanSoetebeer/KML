@@ -108,6 +108,14 @@ const STATUS_LABELS = {
   pending: "Ausstehend",
 };
 
+// Which execution backend handled the run (chosen automatically by URL count:
+// a large list goes to the AWS Fargate bulk crawl, a single/few URLs to Lambda).
+const BACKEND_LABELS = {
+  bulk: "Bulk-Crawl (AWS Fargate)",
+  lambda: "AWS Lambda",
+  local: "Lokal",
+};
+
 function fmtBytes(n) {
   const mb = (n || 0) / (1024 * 1024);
   if (mb >= 1) return mb.toFixed(2) + " MB";
@@ -123,10 +131,11 @@ function renderProgress(job) {
   const results = document.getElementById("sc-results");
   if (job.status === "running") {
     results.innerHTML = "";
+    const be = job.backend ? ` · ${escapeHtml(BACKEND_LABELS[job.backend] || job.backend)}` : "";
     el.innerHTML =
       `<div class="progress-wrap"><div class="progress-bar indeterminate"></div></div>` +
       `<p class="muted">Scraping läuft … <strong>${job.elapsed_seconds}s</strong>` +
-      ` · ${job.urls.length} URL(s) · ${escapeHtml(job.file_types.join(", "))}</p>`;
+      ` · ${job.urls.length} URL(s) · ${escapeHtml(job.file_types.join(", "))}${be}</p>`;
   } else {
     el.innerHTML = "";
   }
@@ -152,9 +161,18 @@ function renderResults(job) {
   const results = document.getElementById("sc-results");
   const s = job.summary;
 
+  const backend = job.backend
+    ? `<p class="muted small">Backend: <strong>${escapeHtml(
+        BACKEND_LABELS[job.backend] || job.backend
+      )}</strong></p>`
+    : "";
+
   if (!s) {
+    // No summary: either an error, or a bulk run dispatched to Fargate that runs
+    // in the background (its results appear under this job id once finished).
     const cls = job.status === "error" ? "err" : "muted";
     results.innerHTML =
+      backend +
       `<p class="${cls}">${escapeHtml(job.detail || "Keine Ergebnisdaten verfügbar.")}</p>`;
     return;
   }
@@ -211,7 +229,7 @@ function renderResults(job) {
       `<tbody>${rows}</tbody></table></div>`;
   }
 
-  results.innerHTML = html;
+  results.innerHTML = backend + html;
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +434,88 @@ async function finishReview(jobId) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Recent runs (client-side, localStorage)
+//
+// The review data (classification manifest, downloads, feedback) is stored in
+// S3 keyed by job_id and served by /api/scrape/results/{job_id} — it survives
+// reloads and webapp restarts. What a reload loses is only *which* job_id was
+// last shown. So we remember recent job ids here and let the user re-open any
+// run's review from S3 — essential for bulk runs, which finish in the
+// background and can only be reviewed after a later reload.
+// ---------------------------------------------------------------------------
+
+const RECENT_KEY = "sc.recentRuns";
+const RECENT_MAX = 10;
+
+function getRecentRuns() {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentRun(entry) {
+  const runs = getRecentRuns();
+  const existing = runs.find((r) => r.job_id === entry.job_id) || {};
+  const merged = { ...existing, ...entry }; // update fields, keep prior ts etc.
+  const rest = runs.filter((r) => r.job_id !== entry.job_id);
+  rest.unshift(merged);
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(rest.slice(0, RECENT_MAX)));
+  } catch {
+    /* storage full / disabled — non-fatal */
+  }
+}
+
+function fmtAgo(ts) {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 60) return "gerade eben";
+  const m = Math.round(s / 60);
+  if (m < 60) return `vor ${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `vor ${h} h`;
+  return `vor ${Math.round(h / 24)} d`;
+}
+
+function renderRecentRuns() {
+  const card = document.getElementById("sc-recent-card");
+  const box = document.getElementById("sc-recent");
+  const runs = getRecentRuns();
+  if (runs.length === 0) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "";
+  box.innerHTML = runs
+    .map((r) => {
+      const be = r.backend ? BACKEND_LABELS[r.backend] || r.backend : "";
+      return (
+        `<button class="recent-run" data-job="${escapeHtml(r.job_id)}">` +
+        `<code>${escapeHtml(r.job_id.slice(0, 8))}…</code> ` +
+        `<span class="muted small">${fmtAgo(r.ts)} · ${r.n_urls} URL(s)` +
+        `${be ? " · " + escapeHtml(be) : ""}</span></button>`
+      );
+    })
+    .join("");
+  box.querySelectorAll(".recent-run").forEach((btn) =>
+    btn.addEventListener("click", () => openRun(btn.dataset.job))
+  );
+}
+
+// Re-open a past run's review from S3 (works after reload / for finished bulk).
+async function openRun(jobId) {
+  showResultCard();
+  document.getElementById("sc-progress").innerHTML = "";
+  document.getElementById("sc-results").innerHTML =
+    `<p class="muted small">Lauf <code>${escapeHtml(jobId.slice(0, 8))}…</code> — ` +
+    `Ergebnisse aus dem Speicher geladen. Falls ein Bulk-Lauf noch aktiv ist, ` +
+    `erscheinen sie nach Abschluss (Seite neu laden).</p>`;
+  await renderClassification(jobId);
+}
+
 function pollStatus(jobId) {
   return new Promise((resolve) => {
     const tick = async () => {
@@ -429,12 +529,14 @@ function pollStatus(jobId) {
         return resolve(false);
       }
       renderProgress(job);
+      if (job.backend) saveRecentRun({ job_id: jobId, backend: job.backend });
       if (job.status === "running") {
         setTimeout(tick, 1500);
         return;
       }
       renderResults(job);
       renderClassification(jobId);
+      renderRecentRuns();
       resolve(job.status === "done");
     };
     tick();
@@ -463,6 +565,12 @@ function setupStart() {
       if (fileInput.files.length) fd.append("file", fileInput.files[0]);
 
       const started = await apiForm("/api/scrape", fd);
+      saveRecentRun({
+        job_id: started.job_id,
+        ts: Date.now(),
+        n_urls: (started.urls || []).length,
+      });
+      renderRecentRuns();
       await pollStatus(started.job_id);
     } catch (err) {
       document.getElementById("sc-progress").innerHTML = "";
@@ -485,4 +593,12 @@ export async function initScrapeSection() {
   await loadModels();
   await loadLog();
   updateButtonState();
+
+  // Restore review access after a reload: list recent runs and auto-open the
+  // most recent one's results from S3 (finished bulk runs included).
+  renderRecentRuns();
+  const recent = getRecentRuns();
+  if (recent.length) {
+    await openRun(recent[0].job_id);
+  }
 }
