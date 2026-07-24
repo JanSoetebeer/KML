@@ -1,0 +1,52 @@
+{
+  "family": "webscraper-bulk",
+  "requiresCompatibilities": ["FARGATE"],
+  "networkMode": "awsvpc",
+  "cpu": "2048",
+  "memory": "8192",
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  },
+  "ephemeralStorage": { "sizeInGiB": 40 },
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/webscraper-bulk-exec",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/webscraper-bulk-task",
+  "containerDefinitions": [
+    {
+      "name": "webscraper-bulk",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/webscraper:latest",
+      "essential": true,
+      "entryPoint": ["python", "bulk_run.py"],
+      "environment": [
+        { "name": "LOCAL_ENABLED", "value": "false" },
+        { "name": "S3_ENABLED", "value": "true" },
+        { "name": "S3_BUCKET", "value": "webscraper-output-ACCOUNT_ID" },
+        { "name": "LOG_DIR", "value": "/tmp/logs" },
+        { "name": "VISITED_STORE_BACKEND", "value": "dynamodb" },
+        { "name": "VISITED_STORE_PATH", "value": "/tmp/visited.json" },
+        { "name": "DYNAMODB_TABLE", "value": "webscraper-visited" },
+        { "name": "CLASSIFIER_ENABLED", "value": "true" },
+        { "name": "REVIEW_MANIFEST_DIR", "value": "/tmp/review" },
+
+        { "name": "CRAWL_PROFILE", "value": "modulhandbuch" },
+
+        { "name": "DOWNLOAD_DELAY", "value": "0.4" },
+        { "name": "CRAWL_MAX_DEPTH", "value": "3" },
+        { "name": "CRAWL_MAX_PAGES", "value": "300" },
+        { "name": "MAX_ITEMS_PER_RUN", "value": "0" },
+        { "name": "MAX_CONCURRENT_JOBS", "value": "8" },
+        { "name": "BULK_MAX_JOBS", "value": "8" },
+
+        { "name": "CONCURRENT_REQUESTS", "value": "16" }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/webscraper-bulk",
+          "awslogs-region": "REGION",
+          "awslogs-stream-prefix": "bulk"
+        }
+      }
+    }
+  ]
+}

@@ -112,6 +112,25 @@ $SG   # <-- note this id for the GitHub variable below
 | `FARGATE_SECURITY_GROUP` | the `$SG` id from step 6 |
 | `FARGATE_SUBNETS` | *(optional)* comma-separated subnet ids; auto-discovered from the default VPC if unset |
 
+### 8. Register the task definition (once)
+
+The **Bulk crawl workflow** registers the task definition itself on every run, so
+if you only ever launch from the Actions tab you can skip this. But the **webapp
+auto-dispatch** and `run-bulk.sh` call `RunTask` against an existing family — so
+register it once, or they fail with `TaskDefinition not found`:
+
+```powershell
+# NOTE: -creplace is case-SENSITIVE. Plain -replace would also rewrite the
+# lowercase "awslogs-region" key and corrupt the JSON.
+(Get-Content webscraper/aws/fargate-taskdef.template.json) `
+  -creplace 'ACCOUNT_ID', $ACCOUNT -creplace 'REGION', $REGION `
+  | Set-Content taskdef.resolved.json -Encoding ascii
+aws ecs register-task-definition --cli-input-json file://taskdef.resolved.json --region $REGION
+```
+
+Re-run this whenever you change `fargate-taskdef.template.json` (new env vars,
+cpu/memory, etc.); `RunTask` always uses the latest revision of the family.
+
 ---
 
 ## Launch a bulk crawl

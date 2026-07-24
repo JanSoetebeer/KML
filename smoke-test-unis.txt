@@ -1,0 +1,7 @@
+# Smoke-test seed list — 4 universities, deliberately different structures.
+# Seeds are homepages (matches the real hs_liste format). Ground truth + how to
+# measure recall: webscraper/deploy/fargate/SMOKE_TEST.md
+https://www.fh-wedel.de/
+https://www.tu-dortmund.de/
+https://www.rwth-aachen.de/
+https://www.fh-muenster.de/
