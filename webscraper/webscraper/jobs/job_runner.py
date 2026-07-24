@@ -104,6 +104,7 @@ class JobRunner:
         ping: bool = True,
         force: bool = False,
         file_types=None,
+        profile=None,
     ):
         self._settings = settings
         self._store = visited_store
@@ -111,6 +112,9 @@ class JobRunner:
         self._ping = ping
         self._force = force
         self._file_types = file_types
+        # Active extraction profile name; falls back to the settings default
+        # (which itself defaults to "modulhandbuch") when not given.
+        self._profile = profile or settings.get("CRAWL_PROFILE")
         self._runner = CrawlerRunner(settings)
         self._summary = BatchSummary()
 
@@ -204,6 +208,7 @@ class JobRunner:
                 start_url=validated,
                 job_id=job_id,
                 file_types=self._file_types,
+                profile=self._profile,
             )
             self._store.mark_visited(validated, job_id)
             found, downloaded, size = _read_stats(crawler)

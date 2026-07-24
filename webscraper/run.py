@@ -98,6 +98,12 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Correlation id for this run. Used to name the classification review "
         "manifest so a caller (webapp/Lambda) can fetch this run's results.",
     )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="Extraction profile to use (e.g. 'modulhandbuch', 'generic', "
+        "'html-content'). Defaults to settings.CRAWL_PROFILE.",
+    )
     return parser.parse_args(argv)
 
 
@@ -150,6 +156,7 @@ def run_batch(
     force: bool = False,
     batch_id: str | None = None,
     file_types=None,
+    profile: str | None = None,
 ) -> int:
     """
     Run a batch of URLs as concurrent jobs.
@@ -191,6 +198,7 @@ def run_batch(
         ping=ping,
         force=force,
         file_types=file_types,
+        profile=profile,
     )
     summary = runner.run(jobs)
 
@@ -211,6 +219,7 @@ def run(
     log_level: str = "INFO",
     ping: bool = True,
     file_types=None,
+    profile: str | None = None,
 ) -> int:
     """
     Single-URL entry point (used by the AWS Lambda handler).
@@ -225,6 +234,7 @@ def run(
         ping=ping,
         batch_id=job_id,
         file_types=file_types,
+        profile=profile,
     )
 
 
@@ -239,6 +249,7 @@ def main(argv=None) -> None:
         force=args.force,
         batch_id=args.batch_id,
         file_types=_parse_file_types(args.file_types),
+        profile=args.profile,
     )
     sys.exit(exit_code)
 

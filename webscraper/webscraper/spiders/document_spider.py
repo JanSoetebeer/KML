@@ -1,22 +1,23 @@
 import gzip
 import logging
-from datetime import datetime, timezone
 from urllib.parse import urljoin, urlparse
 
 import scrapy
 from scrapy import Selector
 from scrapy.http import TextResponse
 
-from webscraper.items import DocumentItem
+from webscraper.profiles import get_profile
 from webscraper.spiders.base_spider import BaseSpider
 
 logger = logging.getLogger(__name__)
 
-# Default file extensions this spider targets if none are supplied.
-TARGET_EXTENSIONS = {".pdf", ".doc", ".docx"}
-
-# Extensions that are never worth following as HTML pages (assets / media).
+# Extensions that are never worth following as HTML pages (assets / media /
+# documents). Document extensions are included so profiles that don't *target*
+# them (e.g. an HTML-content profile) never waste a fetch following them as a
+# page — document-harvesting profiles still download them via ``is_target``,
+# which is checked before ``_should_follow``.
 _NON_PAGE_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".rtf",
     ".css", ".js", ".json", ".xml", ".rss", ".zip", ".gz", ".tar", ".rar",
     ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp", ".bmp", ".ico", ".tiff",
     ".mp3", ".mp4", ".avi", ".mov", ".mkv", ".webm", ".wav", ".flac", ".ogg",
@@ -25,7 +26,7 @@ _NON_PAGE_EXTENSIONS = {
 
 # HTML attributes scanned for downloadable links (documents, images, media).
 # Anchors (<a>) are handled separately so their link text can feed the
-# relevance score — see parse().
+# profile's relevance score — see parse().
 _ASSET_SELECTORS = (
     "link::attr(href)",
     "img::attr(src)",
@@ -38,75 +39,16 @@ _ASSET_SELECTORS = (
 DEFAULT_MAX_DEPTH = 2
 DEFAULT_MAX_PAGES = 60
 
-# ---------------------------------------------------------------------------
-# Focused-crawl relevance scoring
-#
-# The crawl budget (CRAWL_MAX_PAGES) is small, so *which* pages we spend it on
-# matters far more than how many. Each candidate link is scored from tokens in
-# its URL and anchor text; the score becomes the Scrapy request priority, so the
-# frontier is explored best-first — pages that look like they lead to
-# Modulhandbücher are visited before news/events/imprint pages. Documents are
-# always fetched (they don't consume the page budget).
-# ---------------------------------------------------------------------------
-
-_POSITIVE_TOKENS = {
-    "modulhandbuch": 100, "modulhandbuecher": 100, "module-handbook": 100,
-    "modulbeschreibung": 60, "modulkatalog": 60,
-    "modul": 25, "module": 20,
-    "pruefungsordnung": 35, "studienordnung": 35, "studienplan": 30,
-    "curriculum": 30, "ordnung": 12,
-    "studiengang": 20, "studiengaenge": 20, "studium": 15, "studies": 10,
-    "bachelor": 15, "master": 15, "b-sc": 10, "m-sc": 10,
-    "vorlesungsverzeichnis": 20, "lehrveranstaltung": 12, "lehre": 8,
-    "fachbereich": 8, "fakultaet": 8, "institut": 5,
-    "download": 10, "downloads": 10, "dokumente": 10, "formulare": 6,
-    "pdf": 4,
-}
-
-_NEGATIVE_TOKENS = {
-    "aktuelles": -40, "news": -40, "presse": -40, "pressemitteilung": -40,
-    "veranstaltung": -30, "event": -30, "termine": -20, "kalender": -20,
-    "kontakt": -30, "impressum": -60, "datenschutz": -60, "cookie": -50,
-    "mensa": -30, "wohnen": -20, "sport": -20, "hochschulsport": -25,
-    "stellenangebot": -30, "karriere": -20, "jobs": -20, "stellen": -20,
-    "login": -40, "anmeldung": -20, "suche": -25, "search": -25,
-    "sitemap": -20, "rss": -25, "feed": -25,
-    "english": -15, "/en/": -15,
-    "alumni": -20, "spende": -25, "blog": -20, "gremien": -20,
-}
-
-# Umlaut / ß folding so anchor text like "Modulhandbücher" and
-# "Prüfungsordnung" matches the ASCII tokens above.
-_FOLD_MAP = str.maketrans({
-    "ä": "ae", "ö": "oe", "ü": "ue", "ß": "ss",
-    "Ä": "ae", "Ö": "oe", "Ü": "ue",
-})
-
-# Priority floor guaranteeing documents are scheduled before any page follow.
+# Priority floor guaranteeing target resources are scheduled before page follows.
 _DOCUMENT_BASE_PRIORITY = 1000
 
-
-def _fold(text: str) -> str:
-    """Lowercase and fold German umlauts/ß for keyword matching."""
-    if not text:
-        return ""
-    return text.translate(_FOLD_MAP).lower()
+# Extra priority for a link that hops into a not-yet-seen faculty subdomain
+# (e.g. tu-dortmund.de → cs.tu-dortmund.de). University documents frequently
+# live on these faculty sites, so crossing into one is worth exploring promptly.
+_CROSS_SUBDOMAIN_BOOST = 50
 
 
-def _keyword_score(url: str, anchor_text: str = "") -> int:
-    """Relevance score for a link from tokens in its URL + anchor text."""
-    hay = _fold(url) + " ␟ " + _fold(anchor_text)
-    score = 0
-    for token, weight in _POSITIVE_TOKENS.items():
-        if token in hay:
-            score += weight
-    for token, weight in _NEGATIVE_TOKENS.items():
-        if token in hay:
-            score += weight
-    return score
-
-
-def _normalize_extensions(file_types) -> set:
+def _normalize_extensions(file_types) -> frozenset:
     """Normalise a list like ['pdf', '.PNG'] into {'.pdf', '.png'}."""
     normalized = set()
     for ft in file_types or []:
@@ -114,7 +56,7 @@ def _normalize_extensions(file_types) -> set:
         if not ft:
             continue
         normalized.add(ft if ft.startswith(".") else "." + ft)
-    return normalized
+    return frozenset(normalized)
 
 
 def _base_domain(hostname: str) -> str:
@@ -148,53 +90,59 @@ def _sitemap_locs(response) -> tuple[list, bool]:
 
 class DocumentSpider(BaseSpider):
     """
-    Crawl a seed URL (and, up to a bounded depth, its same-site pages) and
-    download all linked PDF / Word documents.
+    Generic crawl **engine**: fetch a seed URL and its same-site pages up to a
+    bounded depth, delegating every use-case-specific decision to a pluggable
+    :class:`~webscraper.profiles.base.ExtractionProfile`.
 
-    Focused (best-first) crawl
-    --------------------------
-    University document pages (e.g. Modulhandbücher) are rarely linked from the
-    homepage directly, and the page budget (``CRAWL_MAX_PAGES``) is small, so the
-    order in which pages are visited is critical. Every candidate link is scored
-    by keyword tokens in its URL and anchor text (see ``_keyword_score``) and the
-    score is used as the Scrapy request **priority** — the frontier is explored
-    best-first, so ``/studium/.../modulhandbuch`` pages are reached before
-    news/events/imprint pages that would otherwise burn the budget.
+    What the engine owns (generic, unchanged per use case)
+    ------------------------------------------------------
+    * **Best-first (focused) crawl.** Each candidate link is scored by the active
+      profile (``score_link``) and that score becomes the Scrapy request
+      *priority*, so the frontier is explored best-first within ``CRAWL_MAX_PAGES``.
+    * **Sitemap seeding.** ``/sitemap.xml`` (+ robots.txt-declared sitemaps) is
+      fetched first: matching target resources are downloaded directly and
+      high-scoring pages are seeded near the top of the frontier.
+    * **Faculty-subdomain discovery.** A link hopping into a new same-base-domain
+      subdomain (e.g. ``cs.tu-dortmund.de``) gets a fresh depth budget + a
+      priority boost and its own sitemap fetch — that's the main-site-to-faculty
+      jump where university documents often live.
+    * Same-site rules, depth/page budgets, dedup, stats.
 
-    Sitemap seeding
-    ---------------
-    Before falling back to link traversal, the spider fetches ``/sitemap.xml``
-    (and any sitemaps declared in ``robots.txt``). Sitemaps are a flat index of
-    the whole site: matching document URLs are downloaded directly and
-    high-scoring pages are seeded near the top of the frontier — skipping the
-    depth traversal for the pages that matter most. Controlled by
-    ``CRAWL_USE_SITEMAP`` (default on).
+    What the profile owns (swap per use case, no engine changes)
+    ------------------------------------------------------------
+    * ``score_link``    — frontier priority (keyword steering, etc.).
+    * ``is_target``     — which links are resources to fetch and extract.
+    * ``extract_target``— fetched binary resource → item(s) (document harvesting).
+    * ``extract_page``  — fetched HTML page → item(s) (content / structured needs).
+
+    Select the profile by name via ``CRAWL_PROFILE`` / ``--profile`` / the
+    ``profile=`` spider argument (default: ``modulhandbuch``).
 
     Usage (via run.py)
     ------------------
-    ``python run.py https://example.edu``
-
-    Extending
-    ---------
-    Override ``_is_target_url`` to widen / narrow the set of downloaded links,
-    ``_should_follow`` to change which pages are crawled, or the
-    ``_POSITIVE_TOKENS`` / ``_NEGATIVE_TOKENS`` maps to retune relevance.
+    ``python run.py https://example.edu --profile modulhandbuch``
     """
 
     name = "document"
 
-    def __init__(self, start_url: str, *args, file_types=None, **kwargs):
+    def __init__(self, start_url: str, *args, file_types=None, profile=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_urls = [start_url]
-        self.target_extensions = _normalize_extensions(file_types) or set(
-            TARGET_EXTENSIONS
-        )
+        self.profile = get_profile(profile)
+        # A ``file_types`` override widens/narrows what the profile downloads
+        # without changing its scoring — one source of truth for targets.
+        override = _normalize_extensions(file_types)
+        if override:
+            self.profile.target_extensions = override
         self._seed_domain = _base_domain(urlparse(start_url).hostname or "")
         # Scrapy's OffsiteMiddleware filters requests outside these domains
         # (subdomains allowed). Belt to the explicit _same_site() checks below.
         if self._seed_domain:
             self.allowed_domains = [self._seed_domain]
         self._pages_crawled = 0
+        # Subdomains whose sitemap we've already fetched (seed + discovered
+        # faculty subdomains), so each is discovered at most once.
+        self._sitemapped_subdomains: set[str] = set()
         # Limits are read lazily from settings on first use (settings aren't
         # attached to the spider until after __init__).
         self._max_depth = None
@@ -202,9 +150,11 @@ class DocumentSpider(BaseSpider):
         self._use_sitemap = None
         self._max_sitemap_urls = None
         self._max_child_sitemaps = None
+        self._max_subdomain_sitemaps = None
         logger.info(
-            "[%s] DocumentSpider targeting: %s  extensions=%s  domain=%s",
-            self.job_id, start_url, sorted(self.target_extensions), self._seed_domain,
+            "[%s] DocumentSpider — seed=%s profile=%s targets=%s domain=%s",
+            self.job_id, start_url, self.profile.name,
+            sorted(self.profile.target_extensions), self._seed_domain,
         )
 
     def _init_limits(self) -> None:
@@ -216,6 +166,7 @@ class DocumentSpider(BaseSpider):
         self._use_sitemap = s.getbool("CRAWL_USE_SITEMAP", True) if s else True
         self._max_sitemap_urls = s.getint("CRAWL_MAX_SITEMAP_URLS", 50) if s else 50
         self._max_child_sitemaps = s.getint("CRAWL_MAX_CHILD_SITEMAPS", 10) if s else 10
+        self._max_subdomain_sitemaps = s.getint("CRAWL_MAX_SUBDOMAIN_SITEMAPS", 15) if s else 15
         logger.info(
             "[%s] crawl limits — max_depth=%d max_pages=%d sitemap=%s",
             self.job_id, self._max_depth, self._max_pages, self._use_sitemap,
@@ -233,6 +184,7 @@ class DocumentSpider(BaseSpider):
             return
         parsed = urlparse(seed)
         origin = f"{parsed.scheme}://{parsed.netloc}"
+        self._sitemapped_subdomains.add(parsed.netloc)
         # /sitemap.xml is the near-universal default; robots.txt may declare more.
         yield scrapy.Request(
             f"{origin}/sitemap.xml", callback=self._parse_sitemap,
@@ -244,12 +196,37 @@ class DocumentSpider(BaseSpider):
             errback=self._on_sitemap_error, priority=60, dont_filter=True,
         )
 
+    def _discover_subdomain(self, url: str):
+        """
+        Fetch the sitemap of a newly-seen (faculty) subdomain, once per
+        subdomain and bounded by ``CRAWL_MAX_SUBDOMAIN_SITEMAPS``. University
+        documents commonly live on faculty subdomains that the main site's
+        sitemap doesn't list, so each such subdomain gets its own discovery.
+        """
+        if not self._use_sitemap:
+            return
+        parsed = urlparse(url)
+        host = parsed.netloc
+        if not host or host in self._sitemapped_subdomains:
+            return
+        if len(self._sitemapped_subdomains) >= self._max_subdomain_sitemaps:
+            return
+        self._sitemapped_subdomains.add(host)
+        origin = f"{parsed.scheme or 'https'}://{host}"
+        logger.info("[%s] discovered faculty subdomain — fetching %s/sitemap.xml",
+                    self.job_id, origin)
+        yield scrapy.Request(
+            f"{origin}/sitemap.xml", callback=self._parse_sitemap,
+            cb_kwargs={"sitemap_depth": 0}, errback=self._on_sitemap_error,
+            priority=55, dont_filter=True,
+        )
+
     def parse(self, response, depth: int = 0, **kwargs):
-        """Parse a page: download found documents, then follow same-site links."""
+        """Parse a page: extract from it, fetch target resources, follow links."""
         self._init_limits()
         # Best-first scheduling can queue more pages than the budget allows;
-        # drop any that arrive once the budget is spent (documents still flow
-        # through _download_document, which is unaffected by the page budget).
+        # drop any that arrive once the budget is spent (target fetches still
+        # flow through _fetch_target, which is unaffected by the page budget).
         if self._pages_crawled >= self._max_pages:
             return
         self._pages_crawled += 1
@@ -263,6 +240,10 @@ class DocumentSpider(BaseSpider):
         # be scanned for links — skip gracefully.
         if not isinstance(response, TextResponse):
             return
+
+        # Let the profile extract item(s) from the page itself (HTML-content /
+        # structured-field needs). Document-harvesting profiles yield nothing here.
+        yield from self.profile.extract_page(response, self)
 
         # Collect candidates as url -> anchor text (asset selectors have none).
         candidates: dict[str, str] = {}
@@ -283,51 +264,61 @@ class DocumentSpider(BaseSpider):
         found = 0
         page_links = []  # (score, url) for same-site follow candidates
         for absolute_url, anchor_text in candidates.items():
-            if self._is_target_url(absolute_url):
-                # Only download documents hosted on the same site (spec: uni
-                # Modulhandbücher live on the university's own domain).
+            if self.profile.is_target(absolute_url, anchor_text):
+                # Only fetch resources hosted on the same site (spec: uni
+                # documents live on the university's own domain).
                 if not self._same_site(absolute_url):
                     continue
                 found += 1
                 self.crawler.stats.inc_value("webscraper/files_found")
                 yield scrapy.Request(
                     url=absolute_url,
-                    callback=self._download_document,
+                    callback=self._fetch_target,
                     cb_kwargs={"source_page": page_url},
-                    priority=_DOCUMENT_BASE_PRIORITY + _keyword_score(absolute_url, anchor_text),
+                    priority=_DOCUMENT_BASE_PRIORITY + self.profile.score_link(absolute_url, anchor_text),
                     errback=self._on_error,
                 )
             elif self._should_follow(absolute_url):
-                page_links.append((_keyword_score(absolute_url, anchor_text), absolute_url))
+                page_links.append((self.profile.score_link(absolute_url, anchor_text), absolute_url))
 
         logger.info(
-            "[%s] depth=%d: queued %d document(s), %d follow candidate(s) from %s",
+            "[%s] depth=%d: queued %d target(s), %d follow candidate(s) from %s",
             self.job_id, depth, found, len(page_links), page_url,
         )
 
         # Follow same-site pages best-first (highest score first) until the
-        # depth / page budget is spent.
-        if depth < self._max_depth:
-            page_links.sort(key=lambda t: t[0], reverse=True)
-            for score, link in page_links:
-                if self._pages_crawled >= self._max_pages:
-                    logger.info(
-                        "[%s] page budget (%d) reached — not following further.",
-                        self.job_id, self._max_pages,
-                    )
-                    break
-                yield scrapy.Request(
-                    url=link,
-                    callback=self.parse,
-                    cb_kwargs={"depth": depth + 1},
-                    priority=score,
-                    errback=self._on_error,
+        # page budget is spent. A link that hops into a *new* faculty subdomain
+        # gets a fresh depth budget (depth=0) and a priority boost — that jump
+        # must not be cut off by the shallow same-subdomain depth cap.
+        page_links.sort(key=lambda t: t[0], reverse=True)
+        current_subdomain = urlparse(page_url).netloc
+        for score, link in page_links:
+            if self._pages_crawled >= self._max_pages:
+                logger.info(
+                    "[%s] page budget (%d) reached — not following further.",
+                    self.job_id, self._max_pages,
                 )
+                break
+            crosses_subdomain = urlparse(link).netloc != current_subdomain and score > 0
+            if crosses_subdomain:
+                yield from self._discover_subdomain(link)
+                next_depth, priority = 0, score + _CROSS_SUBDOMAIN_BOOST
+            elif depth < self._max_depth:
+                next_depth, priority = depth + 1, score
+            else:
+                continue  # at depth cap and not a faculty hop — stop here
+            yield scrapy.Request(
+                url=link,
+                callback=self.parse,
+                cb_kwargs={"depth": next_depth},
+                priority=priority,
+                errback=self._on_error,
+            )
 
     def _parse_sitemap(self, response, sitemap_depth: int = 0):
         """
-        Parse a sitemap (or sitemap index): download matching documents directly
-        and seed high-scoring pages near the top of the frontier.
+        Parse a sitemap (or sitemap index): fetch matching target resources
+        directly and seed high-scoring pages near the top of the frontier.
         """
         self._init_limits()
         locs, is_index = _sitemap_locs(response)
@@ -341,7 +332,7 @@ class DocumentSpider(BaseSpider):
                 return
             children = sorted(
                 (u.strip() for u in locs if u.strip()),
-                key=_keyword_score, reverse=True,
+                key=self.profile.score_link, reverse=True,
             )
             for child in children[: self._max_child_sitemaps]:
                 yield scrapy.Request(
@@ -357,24 +348,24 @@ class DocumentSpider(BaseSpider):
             url = loc.strip()
             if not url or not self._same_site(url):
                 continue
-            if self._is_target_url(url):
+            if self.profile.is_target(url):
                 docs += 1
                 self.crawler.stats.inc_value("webscraper/files_found")
                 yield scrapy.Request(
-                    url=url, callback=self._download_document,
+                    url=url, callback=self._fetch_target,
                     cb_kwargs={"source_page": response.url},
-                    priority=_DOCUMENT_BASE_PRIORITY + _keyword_score(url),
+                    priority=_DOCUMENT_BASE_PRIORITY + self.profile.score_link(url),
                     errback=self._on_error,
                 )
                 continue
-            score = _keyword_score(url)
+            score = self.profile.score_link(url)
             if score > 0:
                 scored_pages.append((score, url))
 
         scored_pages.sort(key=lambda t: t[0], reverse=True)
         seeded = scored_pages[: self._max_sitemap_urls]
         logger.info(
-            "[%s] sitemap %s → %d document(s), %d page(s) seeded (of %d relevant)",
+            "[%s] sitemap %s → %d target(s), %d page(s) seeded (of %d relevant)",
             self.job_id, response.url, docs, len(seeded), len(scored_pages),
         )
         # Seed sitemap hub pages shallow: they are already deep in the site, so
@@ -402,31 +393,15 @@ class DocumentSpider(BaseSpider):
                         dont_filter=True,
                     )
 
-    def _download_document(self, response, source_page: str):
-        """Receive a binary document response and yield a DocumentItem."""
-        url = response.url
-        filename = urlparse(url).path.split("/")[-1] or "unknown"
-        extension = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-        content = response.body
-
-        logger.info(
-            "[%s] Downloaded %s (%d bytes) from %s",
-            self.job_id, filename, len(content), source_page,
-        )
+    def _fetch_target(self, response, source_page: str):
+        """Record stats for a fetched target resource and hand it to the profile."""
         self.crawler.stats.inc_value("webscraper/files_downloaded")
-        self.crawler.stats.inc_value("webscraper/bytes_downloaded", len(content))
-
-        yield DocumentItem(
-            url=url,
-            filename=filename,
-            source_page=source_page,
-            file_type=extension.lstrip("."),
-            content=content,
-            size_bytes=len(content),
-            crawled_at=datetime.now(timezone.utc).isoformat(),
-            job_id=self.job_id,
-            extra={},
+        self.crawler.stats.inc_value("webscraper/bytes_downloaded", len(response.body))
+        logger.info(
+            "[%s] Fetched %s (%d bytes) from %s",
+            self.job_id, response.url, len(response.body), source_page,
         )
+        yield from self.profile.extract_target(response, source_page, self)
 
     def _on_error(self, failure):
         logger.error(
@@ -441,11 +416,6 @@ class DocumentSpider(BaseSpider):
             "[%s] Sitemap discovery skipped for %s — %s",
             self.job_id, failure.request.url, repr(failure.value),
         )
-
-    def _is_target_url(self, url: str) -> bool:
-        """Return True if *url* ends with one of the target extensions."""
-        path = urlparse(url).path.lower()
-        return any(path.endswith(ext) for ext in self.target_extensions)
 
     def _same_site(self, url: str) -> bool:
         """True if *url* is http(s) on the seed's base domain (subdomains ok)."""

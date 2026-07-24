@@ -73,6 +73,12 @@ CLOSESPIDER_ITEMCOUNT = int(os.getenv("MAX_ITEMS_PER_RUN", "200"))
 CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
 CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "60"))
 
+# Active extraction profile (webscraper/profiles/): the use-case-specific layer
+# the generic crawl engine delegates to — what to target, how to score links,
+# how to turn resources/pages into items. Selectable per run via --profile.
+# "modulhandbuch" (module-handbook harvesting) | "generic" | "html-content".
+CRAWL_PROFILE = os.getenv("CRAWL_PROFILE", "modulhandbuch")
+
 # Sitemap discovery: fetch /sitemap.xml (and robots.txt-declared sitemaps) to
 # find document/hub URLs directly, skipping the depth traversal for them.
 CRAWL_USE_SITEMAP = os.getenv("CRAWL_USE_SITEMAP", "true").lower() == "true"
@@ -80,6 +86,10 @@ CRAWL_USE_SITEMAP = os.getenv("CRAWL_USE_SITEMAP", "true").lower() == "true"
 CRAWL_MAX_SITEMAP_URLS = int(os.getenv("CRAWL_MAX_SITEMAP_URLS", "50"))
 # Cap on child sitemaps followed from a sitemap index (highest-scoring first).
 CRAWL_MAX_CHILD_SITEMAPS = int(os.getenv("CRAWL_MAX_CHILD_SITEMAPS", "10"))
+# Cap on distinct faculty subdomains (e.g. cs.tu-dortmund.de) whose own sitemap
+# is fetched when the crawl hops into them. Modulhandbücher often live on these
+# faculty sites, which the main domain's sitemap does not cover.
+CRAWL_MAX_SUBDOMAIN_SITEMAPS = int(os.getenv("CRAWL_MAX_SUBDOMAIN_SITEMAPS", "15"))
 
 # Backstop: also stop a crawl after this many fetched pages (Scrapy built-in).
 CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
