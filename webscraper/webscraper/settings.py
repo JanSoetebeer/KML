@@ -67,9 +67,19 @@ CLOSESPIDER_ITEMCOUNT = int(os.getenv("MAX_ITEMS_PER_RUN", "200"))
 
 # Bounded deep crawl (DocumentSpider follows same-site links to find documents
 # that aren't linked from the seed page). Keep these small to stay polite and
-# bounded — a university site can be enormous.
+# bounded — a university site can be enormous. The crawl is best-first: within
+# this budget the highest-scoring (most Modulhandbuch-like) pages are visited
+# first, so raising the budget is rarely necessary to improve recall.
 CRAWL_MAX_DEPTH = int(os.getenv("CRAWL_MAX_DEPTH", "2"))
 CRAWL_MAX_PAGES = int(os.getenv("CRAWL_MAX_PAGES", "60"))
+
+# Sitemap discovery: fetch /sitemap.xml (and robots.txt-declared sitemaps) to
+# find document/hub URLs directly, skipping the depth traversal for them.
+CRAWL_USE_SITEMAP = os.getenv("CRAWL_USE_SITEMAP", "true").lower() == "true"
+# Cap on how many relevant hub pages to seed from a sitemap's <urlset>.
+CRAWL_MAX_SITEMAP_URLS = int(os.getenv("CRAWL_MAX_SITEMAP_URLS", "50"))
+# Cap on child sitemaps followed from a sitemap index (highest-scoring first).
+CRAWL_MAX_CHILD_SITEMAPS = int(os.getenv("CRAWL_MAX_CHILD_SITEMAPS", "10"))
 
 # Backstop: also stop a crawl after this many fetched pages (Scrapy built-in).
 CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
