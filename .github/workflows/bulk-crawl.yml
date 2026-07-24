@@ -49,6 +49,11 @@ on:
         required: false
         default: "8192"
         type: string
+      force:
+        description: "Re-crawl URLs even if already in the visited store (BULK_FORCE)"
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -126,7 +131,8 @@ jobs:
                   { "name": "BULK_MAX_JOBS",  "value": "${{ inputs.max_jobs }}" },
                   { "name": "MAX_CONCURRENT_JOBS", "value": "${{ inputs.max_jobs }}" },
                   { "name": "CRAWL_MAX_DEPTH","value": "${{ inputs.max_depth }}" },
-                  { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" }
+                  { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" },
+                  { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" }
                 ]
               }
             ]
