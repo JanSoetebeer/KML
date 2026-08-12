@@ -64,7 +64,12 @@ param(
   [switch] $SkipFargate    # skip Phase 11 (Fargate bulk)
 )
 
-$ErrorActionPreference = "Stop"
+# NOTE: 'Continue', not 'Stop'. Under 'Stop', Windows PowerShell 5.1 turns EVERY
+# line a native command (aws) writes to stderr into a terminating error, even
+# when the command SUCCEEDED (exit 0). This script checks success explicitly via
+# $LASTEXITCODE + the Die guards, so a plain 'Continue' is both correct and
+# necessary here.
+$ErrorActionPreference = "Continue"
 
 # --- Resolve repo layout (this file lives in <repo>/webscraper/deploy/) -------
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -105,7 +110,6 @@ function Test-Aws {
   $ErrorActionPreference = "Continue"
   & aws @CliArgs 2>$null | Out-Null
   $rc = $LASTEXITCODE
-  $ErrorActionPreference = "Stop"
   return ($rc -eq 0)
 }
 
@@ -144,7 +148,7 @@ Ok "Bucket  = $Bucket"
 Ok "Image   = $Image"
 
 if (-not $SkipImage) {
-  $ErrorActionPreference = "Continue"; docker info 2>$null | Out-Null; $dok = ($LASTEXITCODE -eq 0); $ErrorActionPreference = "Stop"
+  docker info 2>$null | Out-Null; $dok = ($LASTEXITCODE -eq 0)
   if (-not $dok) { Die "Docker is not running (needed for Phase 5). Start Docker Desktop, or pass -SkipImage." }
   Ok "Docker is running"
 }
@@ -258,12 +262,10 @@ if (Test-Aws lambda get-function --function-name $LambdaFn --region $Region) {
   # New IAM roles can take a few seconds to become assumable - retry.
   $created = $false
   foreach ($try in 1..6) {
-    $ErrorActionPreference = "Continue"
     aws lambda create-function --function-name $LambdaFn --package-type Image `
       --code "ImageUri=$Image" --role $LambdaRoleArn --timeout 600 --memory-size 1536 `
       --environment $lambdaEnv --region $Region 2>$null | Out-Null
-    $rc = $LASTEXITCODE; $ErrorActionPreference = "Stop"
-    if ($rc -eq 0) { $created = $true; break }
+    if ($LASTEXITCODE -eq 0) { $created = $true; break }
     Say "role not assumable yet (attempt $try/6) - waiting 10s ..."; Start-Sleep -Seconds 10
   }
   if (-not $created) { Die "lambda create-function failed (is the image pushed? was Phase 5 run?)" }
@@ -309,7 +311,11 @@ if (-not (Test-Aws iam get-instance-profile --instance-profile-name $WebappRole)
 # ============================================================================
 Head "Phase 8 - webapp security group + key pair"
 $Vpc = (aws ec2 describe-vpcs --filters "Name=isDefault,Values=true" `
-  --query "Vpcs[0].VpcId" --output text --region $Region).Trim()
+  --query "Vpcs[0].VpcId" --output text --region $Region 2>$null).Trim()
+if (-not $Vpc -or $Vpc -eq "None") {
+  Die "No default VPC found in $Region. This sandbox has none - create one with 'aws ec2 create-default-vpc --region $Region' (or set a custom VPC), then re-run."
+}
+Say "using default VPC $Vpc"
 $SgId = (aws ec2 describe-security-groups --filters "Name=group-name,Values=$WebappSg" `
   "Name=vpc-id,Values=$Vpc" --query "SecurityGroups[0].GroupId" --output text --region $Region 2>$null)
 if ($SgId -and $SgId -ne "None") {
@@ -334,6 +340,20 @@ if (Test-Aws ec2 describe-key-pairs --key-names $KeyName --region $Region) {
   aws ec2 create-key-pair --key-name $KeyName --query KeyMaterial --output text --region $Region |
     Out-File -Encoding ascii $pem
   Ok "created key pair -> $pem  (keep it; it's git-ignored via *.pem)"
+}
+
+# Create the Fargate bulk egress SG HERE (before the instance), so its id can be
+# baked into the webapp .env below (FARGATE_SECURITY_GROUP) -> the webapp then
+# auto-dispatches large lists to Fargate. Phase 11 re-uses this same SG.
+if (-not $SkipFargate) {
+  $BulkSgId = (aws ec2 describe-security-groups --filters "Name=group-name,Values=$BulkSg" `
+    "Name=vpc-id,Values=$Vpc" --query "SecurityGroups[0].GroupId" --output text --region $Region 2>$null)
+  if (-not $BulkSgId -or $BulkSgId -eq "None") {
+    $BulkSgId = (aws ec2 create-security-group --group-name $BulkSg `
+      --description "webscraper bulk Fargate egress" --vpc-id $Vpc `
+      --query GroupId --output text --region $Region).Trim()
+    Ok "created bulk security group $BulkSgId"
+  } else { Skip "bulk security group $BulkSg = $BulkSgId" }
 }
 
 # ============================================================================
@@ -391,7 +411,7 @@ S3_ENABLED=true
 S3_BUCKET=$Bucket
 VISITED_STORE_BACKEND=dynamodb
 DYNAMODB_TABLE=$Table
-FARGATE_SECURITY_GROUP=
+FARGATE_SECURITY_GROUP=$BulkSgId
 ECS_CLUSTER=$BulkCluster
 ECS_TASK_FAMILY=$BulkFamily
 BULK_URL_THRESHOLD=10
@@ -402,10 +422,9 @@ set -x
 docker compose up -d --build
 echo "webscraper webapp bootstrap complete at `$(date -u)"
 "@
-  # FARGATE_SECURITY_GROUP is left empty here (the bulk SG is created later in
-  # Phase 11). The webapp only needs it for *auto-dispatching* large lists to
-  # Fargate; the primary bulk path (Actions workflow) uses the repo variable
-  # instead. To enable webapp auto-dispatch later, set it in the instance .env.
+  # FARGATE_SECURITY_GROUP is baked in above ($BulkSgId, created in Phase 8) so the
+  # webapp auto-dispatches large URL lists to Fargate exactly like the Actions
+  # workflow. Empty only if -SkipFargate was passed.
   $udFile = Join-Path $env:TEMP "webscraper-userdata.sh"
   Set-Content -Path $udFile -Value $userData -Encoding ascii
 

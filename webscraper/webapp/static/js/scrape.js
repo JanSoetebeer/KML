@@ -9,6 +9,13 @@ const VERDICT_LABELS = { positive: "Modulhandbuch", negative: "Kein MH" };
 // Populated by clicks, flushed to the server in one batch by "Prüfung abschließen".
 let selectedVerdicts = {};
 
+// Client-side pagination for the relevant-documents table. A bulk run can surface
+// thousands of documents; rendering them all at once bloats the DOM and makes the
+// page unusable. The FULL list stays in memory (verdict selection spans all of
+// it), but only REVIEW_PAGE_SIZE rows are in the DOM at a time.
+const REVIEW_PAGE_SIZE = 100;
+let reviewState = { jobId: null, relevant: [], page: 0 };
+
 function escapeHtml(s) {
   return String(s)
     .replaceAll("&", "&amp;")
@@ -313,45 +320,90 @@ async function renderClassification(jobId) {
     }
   }
 
-  const rows = data.relevant
+  // Keep the full relevant list in memory (verdict selection spans all of it) and
+  // render it one page at a time — thousands of rows must not all hit the DOM.
+  reviewState = { jobId, relevant: data.relevant, page: 0 };
+
+  box.innerHTML =
+    summary +
+    `<div id="sc-relevant"></div>` +
+    `<div class="review-actions">` +
+    `<button id="sc-finish-review" class="finish-btn"></button>` +
+    `<span id="sc-review-msg" class="muted small"></span></div>`;
+
+  renderRelevantPage();
+
+  document
+    .getElementById("sc-finish-review")
+    .addEventListener("click", () => finishReview(jobId));
+  updateFinishButton();
+}
+
+// Render the current page of the relevant-documents table plus its pager. Called
+// on first load and on every page change; re-wires the visible page's buttons.
+// Verdict selection lives in `selectedVerdicts` (keyed by manifest index), so it
+// survives paging — switching pages never loses a marked row.
+function renderRelevantPage() {
+  const { jobId, relevant, page } = reviewState;
+  const host = document.getElementById("sc-relevant");
+  if (!host) return;
+
+  const total = relevant.length;
+  const pages = Math.max(1, Math.ceil(total / REVIEW_PAGE_SIZE));
+  const cur = Math.min(Math.max(0, page), pages - 1);
+  reviewState.page = cur;
+  const start = cur * REVIEW_PAGE_SIZE;
+  const slice = relevant.slice(start, start + REVIEW_PAGE_SIZE);
+
+  const rows = slice
     .map((r) => {
       const score = r.score === null || r.score === undefined ? "—" : r.score.toFixed(3);
       const label = DECISION_LABELS[r.decision] || r.decision;
       return (
         `<tr>` +
-        `<td>${escapeHtml(r.filename)}</td>` +
+        `<td class="file-cell" title="${escapeHtml(r.filename)}">${escapeHtml(r.filename)}</td>` +
         `<td><span class="badge badge-${r.decision === "automatic_positive" ? "scraped" : "pending"}">${escapeHtml(label)}</span></td>` +
         `<td class="num">${score}</td>` +
-        `<td class="muted small" title="${escapeHtml(r.url)}">${escapeHtml(r.hostname)}</td>` +
+        `<td class="src-cell muted small" title="${escapeHtml(r.url)}">${escapeHtml(r.hostname)}</td>` +
         `<td class="verdict-cell">${verdictButtons(r)}</td>` +
-        `<td><button class="dl-btn" data-idx="${r.index}" data-name="${escapeHtml(r.filename)}">Download</button></td>` +
+        `<td class="dl-cell"><button class="dl-btn" data-idx="${r.index}" data-name="${escapeHtml(r.filename)}">Download</button></td>` +
         `</tr>`
       );
     })
     .join("");
 
-  box.innerHTML =
-    summary +
+  const from = total === 0 ? 0 : start + 1;
+  const to = Math.min(start + REVIEW_PAGE_SIZE, total);
+  const pager =
+    `<div class="pager">` +
+    `<button class="pager-btn" data-nav="prev"${cur === 0 ? " disabled" : ""}>‹ Zurück</button>` +
+    `<span class="pager-info">${from}–${to} von ${total} · Seite ${cur + 1}/${pages}</span>` +
+    `<button class="pager-btn" data-nav="next"${cur >= pages - 1 ? " disabled" : ""}>Weiter ›</button>` +
+    `</div>`;
+
+  host.innerHTML =
+    pager +
     `<div class="table-scroll"><table class="result-table">` +
     `<thead><tr><th>Datei</th><th>Klassifikation</th><th>Score</th><th>Quelle</th>` +
     `<th>Prüfung</th><th></th></tr></thead>` +
     `<tbody>${rows}</tbody></table></div>` +
-    `<div class="review-actions">` +
-    `<button id="sc-finish-review" class="finish-btn"></button>` +
-    `<span id="sc-review-msg" class="muted small"></span></div>`;
+    pager;
 
-  box.querySelectorAll(".dl-btn").forEach((btn) =>
+  host.querySelectorAll(".dl-btn").forEach((btn) =>
     btn.addEventListener("click", () =>
       downloadDoc(jobId, Number(btn.dataset.idx), btn.dataset.name)
     )
   );
-  box.querySelectorAll(".verdict-btn").forEach((btn) =>
+  host.querySelectorAll(".verdict-btn").forEach((btn) =>
     btn.addEventListener("click", () => selectVerdict(btn))
   );
-  document
-    .getElementById("sc-finish-review")
-    .addEventListener("click", () => finishReview(jobId));
-  updateFinishButton();
+  host.querySelectorAll(".pager-btn").forEach((btn) =>
+    btn.addEventListener("click", () => {
+      if (btn.disabled) return;
+      reviewState.page = cur + (btn.dataset.nav === "next" ? 1 : -1);
+      renderRelevantPage();
+    })
+  );
 }
 
 // Two verdict buttons for one row, highlighting the current selection.

@@ -298,6 +298,43 @@ input[type="file"] { color: var(--muted); }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* Long file / source (university) names must WRAP, not push the row wider — that
+   is what used to shove the Download button off the right edge. */
+.result-table td.file-cell,
+.result-table td.src-cell {
+  max-width: 320px;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  white-space: normal;
+}
+/* Keep the download button intact and always visible in its own column. */
+.result-table td.dl-cell { white-space: nowrap; text-align: right; }
+
+/* Pagination controls for long result lists (thousands of documents) */
+.pager {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  padding: 0.4rem 0;
+  flex-wrap: wrap;
+}
+.pager-info {
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.pager-btn {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+}
+.pager-btn:disabled { opacity: 0.4; cursor: default; }
+.pager-btn:not(:disabled):hover { background: #31405a; }
 
 /* Human-in-the-loop review verdict buttons */
 .verdict-cell { white-space: nowrap; }
