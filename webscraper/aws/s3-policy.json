@@ -10,8 +10,8 @@
         "s3:ListBucket"
       ],
       "Resource": [
-        "arn:aws:s3:::webscraper-output-660941536751",
-        "arn:aws:s3:::webscraper-output-660941536751/*"
+        "arn:aws:s3:::webscraper-output-ACCOUNT_ID",
+        "arn:aws:s3:::webscraper-output-ACCOUNT_ID/*"
       ]
     }
   ]

@@ -5,7 +5,7 @@
       "Sid": "InvokeScraperLambda",
       "Effect": "Allow",
       "Action": "lambda:InvokeFunction",
-      "Resource": "arn:aws:lambda:eu-central-1:660941536751:function:webscraper"
+      "Resource": "arn:aws:lambda:REGION:ACCOUNT_ID:function:webscraper"
     }
   ]
 }
