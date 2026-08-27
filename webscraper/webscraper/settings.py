@@ -100,6 +100,15 @@ CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
 # recovering handbooks the link-crawl can't reach. Empty ⇒ discovery disabled.
 DISCOVERY_SEEDS_PATH = os.getenv("DISCOVERY_SEEDS_PATH", "")
 
+# JS rendering (FirecrawlRenderMiddleware): render page requests through Firecrawl
+# so JavaScript-built sites (the "0 documents" universities) expose their links
+# and PDF downloads. Opt-in for a targeted run over JS-heavy domains — off by
+# default the crawl is unchanged. Needs FIRECRAWL_API_KEY. See the middleware.
+RENDER_JS = os.getenv("RENDER_JS", "false").lower() == "true"
+RENDER_TIMEOUT = int(os.getenv("RENDER_TIMEOUT", "60"))
+# Firecrawl API key — also used by the discovery FirecrawlProvider.
+FIRECRAWL_API_KEY = os.getenv("FIRECRAWL_API_KEY", "")
+
 # ---------------------------------------------------------------------------
 # HTTP cache (speeds up re-runs during development; disable in production)
 # ---------------------------------------------------------------------------
@@ -191,6 +200,9 @@ if S3_ENABLED:
 DOWNLOADER_MIDDLEWARES = {
     "scrapy.downloadermiddlewares.robotstxt.RobotsTxtMiddleware": 100,
     "webscraper.middlewares.polite_middleware.PoliteMiddleware": 200,
+    # Renders JS pages via Firecrawl when RENDER_JS=true; self-disables (raises
+    # NotConfigured) otherwise. After robots (100) so robots.txt is still obeyed.
+    "webscraper.middlewares.firecrawl_render.FirecrawlRenderMiddleware": 300,
     "scrapy.downloadermiddlewares.httpcompression.HttpCompressionMiddleware": 810,
 }
 

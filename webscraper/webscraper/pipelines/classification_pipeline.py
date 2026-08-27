@@ -33,7 +33,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-from webscraper.items import DocumentItem
+from webscraper.items import ContentItem, DocumentItem
 from webscraper.pipelines.base_pipeline import BasePipeline
 
 logger = logging.getLogger(__name__)
@@ -135,7 +135,14 @@ class ClassificationPipeline(BasePipeline):
     # -- per item --------------------------------------------------------------
 
     def process_item(self, item, spider):
-        if self._clf is None or not isinstance(item, DocumentItem):
+        if self._clf is None:
+            return item
+        # HTML-content profiles (e.g. JS-rendered module catalogues on sites with
+        # no PDF handbook) yield ContentItem; classify its text through the same
+        # model + manifest so those pages are scored and reviewed like documents.
+        if isinstance(item, ContentItem):
+            return self._process_content(item, spider)
+        if not isinstance(item, DocumentItem):
             return item
 
         file_type = (item.get("file_type") or "").lower()
@@ -164,6 +171,68 @@ class ClassificationPipeline(BasePipeline):
             result["module_handbook_score"], result["extraction_status"],
         )
         return item
+
+    def _process_content(self, item, spider):
+        """Classify a ContentItem's extracted page text (HTML-content profiles)."""
+        text = (item.get("text") or "").strip()
+        if not text:
+            spider.crawler.stats.inc_value("webscraper/classify_skipped")
+            return item
+
+        from mlclassifier import config
+        from mlclassifier.extraction import STATUS_EMPTY, STATUS_OK
+
+        url = item.get("url", "")
+        filename = urlparse(url).path.rstrip("/").split("/")[-1] or (urlparse(url).hostname or "page")
+        record = {
+            "filename": filename,
+            "file_type": "html",
+            "title": item.get("title", "") or "",
+            "text": text[: config.MAX_TEXT_CHARS] if config.MAX_TEXT_CHARS else text,
+            "page_count": 1,
+            "text_length": len(text),
+            "ocr_used": False,
+            "extraction_status": STATUS_OK if len(text) >= config.MIN_TEXT_CHARS else STATUS_EMPTY,
+        }
+        try:
+            result = self._clf.classify_record(record)
+        except Exception as exc:  # noqa: BLE001 — a bad page must not kill the crawl
+            logger.error("[%s] classify (content) failed for %s: %s",
+                         item.get("job_id"), url, exc)
+            spider.crawler.stats.inc_value("webscraper/classify_error")
+            return item
+
+        item.setdefault("extra", {})["classification"] = result
+        self._record_stats(spider, result)
+        self._write_content_manifest(item, result)
+        logger.info("[%s] %s (html) → %s (score=%s)", item.get("job_id"), filename,
+                    result["decision"], result["module_handbook_score"])
+        return item
+
+    def _write_content_manifest(self, item, result: dict) -> None:
+        """Write a manifest line for a classified HTML page (same schema as docs)."""
+        if self._manifest is None:
+            return
+        url = item.get("url", "")
+        hostname = urlparse(url).hostname or "unknown"
+        entry = {
+            "job_id": item.get("job_id", ""),
+            "url": url,
+            "source_page": url,
+            "hostname": hostname,
+            "filename": urlparse(url).path.rstrip("/").split("/")[-1] or hostname,
+            "file_type": "html",
+            "saved_path": "",
+            "s3_key": "",
+            "module_handbook_score": result["module_handbook_score"],
+            "decision": result["decision"],
+            "is_module_handbook": result["is_module_handbook"],
+            "extraction_status": result["extraction_status"],
+            "model_version": result["model_version"],
+            "crawled_at": item.get("crawled_at", ""),
+        }
+        self._manifest.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        self._manifest.flush()
 
     # -- helpers ---------------------------------------------------------------
 

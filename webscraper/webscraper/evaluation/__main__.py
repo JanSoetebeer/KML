@@ -51,6 +51,9 @@ def main(argv=None) -> int:
                     help="override the classifier's UPPER threshold: docs scoring "
                          ">= this become positive. Lower it to recover handbooks "
                          "stuck in the review band (model default 0.6511).")
+    ap.add_argument("--merge-latest", action="store_true",
+                    help="de-dup records by URL keeping the last — list an OCR/LLM "
+                         "re-processing manifest AFTER the run manifest to override it")
     ap.add_argument("--out-html", default="evaluation_report.html")
     ap.add_argument("--out-json", default="evaluation_data.json")
     args = ap.parse_args(argv)
@@ -66,7 +69,8 @@ def main(argv=None) -> int:
               f"(what-if; unset falls back to model default)", file=sys.stderr)
     ev = build_evaluation(args.manifest, args.csv,
                           expected_total=args.expected_total, run_id=args.run_id,
-                          lower=args.lower, upper=args.upper)
+                          lower=args.lower, upper=args.upper,
+                          merge_latest=args.merge_latest)
 
     g = ev.global_metrics
     print(f"  universities: {ev.n_universities_input}  |  documents: {ev.n_manifest_records}",

@@ -29,12 +29,53 @@ those optional dependencies; wiring them in is a drop-in later step.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 
 from . import config
 
 logger = logging.getLogger(__name__)
+
+
+def _ocr_enabled() -> bool:
+    """OCR fallback on? Env ``OCR_ENABLED`` overrides the config default."""
+    raw = os.getenv("OCR_ENABLED")
+    if raw is None:
+        return config.OCR_ENABLED_DEFAULT
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _ocr_pdf_doc(doc) -> str:
+    """
+    OCR an open PyMuPDF document → text. Rasterises each page with PyMuPDF (no
+    poppler needed) and runs Tesseract via ``pytesseract``. Degrades to ``""`` if
+    the OCR deps (pytesseract / Pillow) or the tesseract binary aren't present, so
+    a missing install never breaks extraction — it just means no OCR recovery.
+    """
+    try:
+        import io
+
+        import pytesseract
+        from PIL import Image
+    except ImportError:
+        logger.warning("OCR enabled but pytesseract/Pillow not installed — skipping OCR")
+        return ""
+
+    parts: list[str] = []
+    for i, page in enumerate(doc):
+        if i >= config.OCR_MAX_PAGES:
+            break
+        try:
+            pix = page.get_pixmap(dpi=config.OCR_DPI)
+            img = Image.open(io.BytesIO(pix.tobytes("png")))
+            parts.append(pytesseract.image_to_string(img, lang=config.OCR_LANG))
+        except pytesseract.TesseractNotFoundError:
+            logger.warning("OCR enabled but the tesseract binary isn't installed — skipping OCR")
+            return ""
+        except Exception as exc:  # noqa: BLE001 — a bad page/lang must not abort the doc
+            logger.debug("OCR failed on page %d: %s", i, exc)
+    return "\n".join(parts)
 
 # Lone UTF-16 surrogate code points (U+D800–U+DFFF). PyMuPDF can emit these from
 # malformed PDFs; they are not valid UTF-8, so they crash JSON caching and any
@@ -77,6 +118,7 @@ def _truncate(text: str) -> str:
 
 def _record_from_pdf_doc(doc, filename: str) -> dict:
     """Build the unified record from an already-open PyMuPDF document."""
+    ocr_used = False
     try:
         parts = []
         for page in doc:
@@ -87,6 +129,17 @@ def _record_from_pdf_doc(doc, filename: str) -> dict:
         text = _sanitize("\n".join(parts))
         page_count = doc.page_count
         title = _sanitize((doc.metadata or {}).get("title") or "")
+
+        # OCR fallback: a scanned handbook has page images but (almost) no text
+        # layer, so it would be flagged empty_document and routed to review with
+        # no score. If OCR is enabled, rasterise + Tesseract the pages and use
+        # that text when it beats the (near-empty) extracted text. Done while the
+        # doc is still open (closed in ``finally``).
+        if len(text.strip()) < config.MIN_TEXT_CHARS and _ocr_enabled():
+            ocr_text = _sanitize(_ocr_pdf_doc(doc))
+            if len(ocr_text.strip()) > len(text.strip()):
+                text = ocr_text
+                ocr_used = True
     finally:
         doc.close()
 
@@ -100,7 +153,7 @@ def _record_from_pdf_doc(doc, filename: str) -> dict:
         "text": _truncate(text),
         "page_count": page_count,
         "text_length": text_length,
-        "ocr_used": False,
+        "ocr_used": ocr_used,
         "extraction_status": status,
     }
 

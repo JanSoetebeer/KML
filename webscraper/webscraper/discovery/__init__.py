@@ -15,11 +15,16 @@ from webscraper.discovery.discover import (
     load_discovery_seeds,
     summarize,
 )
-from webscraper.discovery.providers import SearchProvider, get_provider
+from webscraper.discovery.providers import (
+    SearchProvider,
+    UnionProvider,
+    get_provider,
+)
 
 __all__ = [
     "get_provider",
     "SearchProvider",
+    "UnionProvider",
     "discover_for_domains",
     "domains_from_urls",
     "load_discovery_seeds",

@@ -82,7 +82,8 @@ def _is_doc_url(url: str) -> bool:
 
 
 def _http_get(url: str, timeout: float = 20.0, data: bytes | None = None,
-              retries: int = 3, backoff: float = 1.5) -> str:
+              retries: int = 3, backoff: float = 1.5,
+              headers: dict | None = None) -> str:
     """GET/POST returning decoded text.
 
     Retries transient failures — connection drops/timeouts and HTTP 429/5xx —
@@ -92,7 +93,10 @@ def _http_get(url: str, timeout: float = 20.0, data: bytes | None = None,
     A 4xx (other than 429) is a semantic answer (e.g. 404 = no captures) and is
     re-raised immediately without retrying.
     """
-    req = urllib.request.Request(url, data=data, headers={"User-Agent": _UA})
+    hdrs = {"User-Agent": _UA}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=data, headers=hdrs)
     last: Exception | None = None
     for attempt in range(retries):
         try:
@@ -153,8 +157,13 @@ class CommonCrawlProvider(SearchProvider):
     name = "commoncrawl"
     _COLLINFO = "https://index.commoncrawl.org/collinfo.json"
 
-    def __init__(self, index_url: str | None = None, indexes: int = 3, **kw):
+    def __init__(self, index_url: str | None = None, indexes: int = 3,
+                 url_stems: tuple | list | None = None, **kw):
         super().__init__(**kw)
+        # URL stems used to keep the handbook-like captures (use-case-specific;
+        # supplied by the active profile). Falls back to the Modulhandbuch set so
+        # the default run works with no wiring.
+        self.url_stems = list(url_stems) if url_stems else list(_URL_STEMS)
         # Resolve the newest N monthly indexes once (e.g. CC-MAIN-2026-30, -26 …),
         # cached on the instance so a batch of domains resolves them a single time.
         if index_url:
@@ -214,9 +223,9 @@ class CommonCrawlProvider(SearchProvider):
         if not self._index_urls:
             return []
         base = _base_domain(domain)
-        # Match on broad URL stems (union with any caller-supplied terms) — the
-        # capture list is URL-only, so phrase queries don't apply here.
-        stems = list(_URL_STEMS) + [_fold(t) for t in terms]
+        # Match on the profile's URL stems (union with any caller-supplied terms)
+        # — the capture list is URL-only, so phrase queries don't apply here.
+        stems = list(self.url_stems) + [_fold(t) for t in terms]
         seen: set[str] = set()
         matched: list[str] = []
         for index_url in self._index_urls:
@@ -312,6 +321,117 @@ class GoogleCSEProvider(SearchProvider):
         return self._keep(base, found)[: self.max_results]
 
 
+class SerperProvider(SearchProvider):
+    """Serper.dev — Google SERP results via a simple API. Needs ``SERPER_API_KEY``.
+
+    Returns Google's *actual* index, so it reaches the deep, unlinked handbooks
+    (e.g. Konstanz's ``modulebook_*.pdf``) that Common Crawl's link-based capture
+    misses — scoped per domain with the ``site:`` operator. $1 / 1,000 queries,
+    2,500 free credits on signup. Best run unioned with ``commoncrawl``.
+    """
+
+    name = "serper"
+    _ENDPOINT = "https://google.serper.dev/search"
+
+    def __init__(self, api_key: str, num: int = 10, use_filetype: bool = False, **kw):
+        super().__init__(**kw)
+        self.api_key = api_key
+        # Free tier caps num at 10 and rejects the site:+filetype: combination
+        # ("Query pattern not allowed for free accounts"). A PAID plan lifts both:
+        # set num up to 100 and use_filetype=True to fetch far more PDFs per query
+        # and target documents directly — a real recall gain on handbook-rich unis.
+        self.num = num
+        self.use_filetype = use_filetype
+
+    def search(self, domain: str, terms: list[str]) -> list[str]:
+        if not self.api_key:
+            logger.warning("Serper: missing SERPER_API_KEY")
+            return []
+        base = _base_domain(domain)
+        found: list[str] = []
+        for term in terms:
+            q = f"site:{base} {term} filetype:pdf" if self.use_filetype else f"site:{base} {term}"
+            payload = json.dumps({"q": q, "num": self.num}).encode()
+            try:
+                body = _http_get(
+                    self._ENDPOINT, data=payload, timeout=20.0,
+                    headers={"X-API-KEY": self.api_key,
+                             "Content-Type": "application/json"},
+                )
+                data = json.loads(body)
+            except urllib.error.HTTPError as exc:
+                logger.warning("Serper HTTP %s for %s (%s)", exc.code, base, q)
+                # 401/403 = bad or exhausted key: stop to avoid burning the rest.
+                if exc.code in (401, 403):
+                    break
+                data = {}
+            except Exception as exc:  # noqa: BLE001 — one bad term must not abort
+                logger.warning("Serper query failed (%s): %s", q, exc)
+                data = {}
+            finally:
+                if self.per_query_delay:
+                    time.sleep(self.per_query_delay)
+            for item in data.get("organic", []):
+                if item.get("link"):
+                    found.append(item["link"])
+            if len(self._keep(base, found)) >= self.max_results:
+                break
+        return self._keep(base, found)[: self.max_results]
+
+
+class FirecrawlProvider(SearchProvider):
+    """Firecrawl ``/map`` — enumerate a site's URLs with JS rendering. Needs
+    ``FIRECRAWL_API_KEY``.
+
+    Where Common Crawl and the SERP APIs miss handbooks because the site is a
+    JavaScript app whose links never appear in a static fetch, Firecrawl renders
+    the site and returns the URL graph, so document links hidden behind JS are
+    discovered. Filters to the profile's ``url_stems`` + document extensions, the
+    same as the other providers, so it stays a drop-in in a ``--provider`` union.
+    """
+
+    name = "firecrawl"
+    _ENDPOINT = "https://api.firecrawl.dev/v1/map"
+
+    def __init__(self, api_key: str, url_stems: tuple | list | None = None, **kw):
+        super().__init__(**kw)
+        self.api_key = api_key
+        self.url_stems = list(url_stems) if url_stems else list(_URL_STEMS)
+
+    def search(self, domain: str, terms: list[str]) -> list[str]:
+        if not self.api_key:
+            logger.warning("Firecrawl: missing FIRECRAWL_API_KEY")
+            return []
+        base = _base_domain(domain)
+        payload = json.dumps({
+            "url": f"https://{base}",
+            "search": terms[0] if terms else "",  # biases the map toward this term
+            "limit": 5000,
+        }).encode()
+        try:
+            body = _http_get(
+                self._ENDPOINT, data=payload, timeout=90.0,
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"},
+            )
+            data = json.loads(body)
+        except urllib.error.HTTPError as exc:
+            logger.warning("Firecrawl HTTP %s for %s", exc.code, base)
+            return []  # 402 = out of credits, 401 = bad key, 404 = unmappable
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("Firecrawl map failed for %s (%s)", base, exc)
+            return []
+        finally:
+            if self.per_query_delay:
+                time.sleep(self.per_query_delay)
+        # /map returns "links" as URL strings (or {url: …} objects across versions).
+        links = data.get("links", []) or []
+        urls = [(l if isinstance(l, str) else l.get("url", "")) for l in links]
+        stems = list(self.url_stems) + [_fold(t) for t in terms]
+        matched = [u for u in urls if _matches_terms(u, stems)]
+        return self._keep(base, matched)[: self.max_results]
+
+
 # --------------------------------------------------------------------------- #
 # Shared term matching (umlaut-folded, like the crawl profile's keyword scoring)
 # --------------------------------------------------------------------------- #
@@ -329,18 +449,51 @@ def _matches_terms(url: str, folded_terms: list[str]) -> bool:
     return any(t in hay for t in folded_terms) if folded_terms else True
 
 
+class UnionProvider(SearchProvider):
+    """Run several providers for each domain and union their results (dedup,
+    order-stable, first provider wins ties). Use it to combine Serper's Google
+    reach with Common Crawl's free bulk coverage in one discovery pass.
+    """
+
+    name = "union"
+
+    def __init__(self, providers: list[SearchProvider], max_results: int = 25):
+        super().__init__(max_results=max_results)
+        self.providers = providers
+
+    def search(self, domain: str, terms: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for provider in self.providers:
+            for url in provider.search(domain, terms):
+                if url not in seen:
+                    seen.add(url)
+                    out.append(url)
+        return out[: self.max_results]
+
+
 def get_provider(name: str, *, api_key: str = "", cse_id: str = "",
+                 serper_key: str = "", firecrawl_key: str = "",
+                 serper_num: int = 10, serper_filetype: bool = False,
                  per_query_delay: float = 0.0, max_results: int = 20,
-                 indexes: int = 3) -> SearchProvider:
+                 indexes: int = 3,
+                 url_stems: tuple | list | None = None) -> SearchProvider:
     """Factory: build a provider by name. Unknown names raise ``ValueError``."""
     name = (name or "").lower().strip()
     if name == "commoncrawl":
         return CommonCrawlProvider(indexes=indexes, per_query_delay=per_query_delay,
-                                   max_results=max_results)
+                                   max_results=max_results, url_stems=url_stems)
     if name == "duckduckgo":
         return DuckDuckGoProvider(max_results=max_results)
     if name == "google":
         return GoogleCSEProvider(api_key=api_key, cse_id=cse_id,
                                  per_query_delay=per_query_delay, max_results=max_results)
+    if name == "serper":
+        return SerperProvider(api_key=serper_key, num=serper_num,
+                              use_filetype=serper_filetype,
+                              per_query_delay=per_query_delay, max_results=max_results)
+    if name == "firecrawl":
+        return FirecrawlProvider(api_key=firecrawl_key, url_stems=url_stems,
+                                 per_query_delay=per_query_delay, max_results=max_results)
     raise ValueError(f"unknown SEARCH_PROVIDER {name!r} "
-                     "(expected: commoncrawl | duckduckgo | google)")
+                     "(expected: commoncrawl | duckduckgo | google | serper | firecrawl)")

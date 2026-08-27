@@ -144,6 +144,26 @@ def load_manifest_records(paths: Iterable[str]) -> list[dict]:
     return records
 
 
+def dedup_latest(records: list[dict], key: str = "url") -> list[dict]:
+    """De-duplicate records by *key*, keeping the LAST occurrence, order-stable.
+
+    Lets a re-processing pass (OCR / LLM review) be merged over the original run
+    by listing its output manifest *after* the run manifest: the updated line for
+    a document wins. Records missing the key are always kept (never merged away).
+    """
+    last_index: dict = {}
+    for i, r in enumerate(records):
+        k = r.get(key)
+        if k:
+            last_index[k] = i
+    out: list[dict] = []
+    for i, r in enumerate(records):
+        k = r.get(key)
+        if not k or last_index.get(k) == i:
+            out.append(r)
+    return out
+
+
 def rescore_decisions(
     records: list[dict], lower: float, upper: float
 ) -> int:
@@ -241,17 +261,23 @@ def build_evaluation(
     run_id: str = "",
     lower: Optional[float] = None,
     upper: Optional[float] = None,
+    merge_latest: bool = False,
 ) -> RunEvaluation:
     """Full pipeline: load → join → per-uni metrics → scenarios → temporal →
     throughput. Returns a fully populated :class:`RunEvaluation`.
 
     If ``lower``/``upper`` are given, decisions are recomputed from each record's
     stored score at those thresholds (see :func:`rescore_decisions`) — useful for
-    what-if evaluation of a threshold change without re-crawling.
+    what-if evaluation of a threshold change without re-crawling. If
+    ``merge_latest`` is set, records are de-duplicated by URL keeping the last
+    occurrence, so an OCR/LLM re-processing manifest listed after the run manifest
+    overrides it.
     """
 
     unis = load_universities(csv_path)
     records = load_manifest_records(manifest_paths)
+    if merge_latest:
+        records = dedup_latest(records, key="url")
     if lower is not None or upper is not None:
         lo = lower if lower is not None else 0.3317
         up = upper if upper is not None else 0.6511

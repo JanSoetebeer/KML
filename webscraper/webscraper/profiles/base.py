@@ -104,8 +104,15 @@ class ExtractionProfile:
     target_extensions = DEFAULT_TARGET_EXTENSIONS
     #: Search terms for external discovery (search-engine seeding). Empty ⇒ the
     #: profile is not discovered for — the crawl relies on link-following only.
-    #: See :mod:`webscraper.discovery`.
+    #: Used as query phrases by search-API providers (Serper/Google). See
+    #: :mod:`webscraper.discovery`.
     discovery_terms: tuple = ()
+    #: Broad URL substrings that mark a *relevant* document URL, for providers
+    #: that return every doc URL on a domain and filter client-side (Common
+    #: Crawl). Keep them short so real-world spellings all match. Empty ⇒ fall
+    #: back to matching the ``discovery_terms``. This is the one place a new use
+    #: case (news, datasheets, …) declares "which URLs are mine".
+    discovery_url_stems: tuple = ()
 
     # -- frontier control ------------------------------------------------------
 

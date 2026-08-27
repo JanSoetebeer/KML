@@ -23,6 +23,12 @@ class ModulhandbuchProfile(KeywordScoredProfile):
         "modulhandbuch", "modulbeschreibung", "modulhandbücher",
         "module handbook", "modulebook", "modulkatalog",
     )
+    # Short URL stems for Common-Crawl-style client-side filtering (catches
+    # modulbook/modulebook/modulhandbuch via "modul", MHB via "mhb", etc.).
+    discovery_url_stems = (
+        "modul", "mhb", "handbuch", "curric", "studienplan",
+        "studienverlauf", "pruefungsordnung", "spo", "stupo",
+    )
 
     POSITIVE_TOKENS = {
         "modulhandbuch": 100, "modulhandbuecher": 100, "module-handbook": 100,

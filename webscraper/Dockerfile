@@ -15,6 +15,14 @@ FROM public.ecr.aws/lambda/python:3.12
 COPY webscraper/requirements.txt ${LAMBDA_TASK_ROOT}/
 RUN pip install --no-cache-dir -r ${LAMBDA_TASK_ROOT}/requirements.txt
 
+# Optional: OCR of scanned PDFs during the crawl (OCR_ENABLED=true). The Python
+# side (pytesseract/Pillow) is installed above; OCR also needs the tesseract
+# binary + German language pack. Uncomment to bake it in (adds ~150 MB). The
+# base image is Amazon Linux 2023, so use dnf. Left off by default — the batch
+# recovery (mlclassifier/reprocess_ocr.py) normally runs locally, and OCR stays a
+# no-op without these, so the build is unaffected.
+# RUN dnf install -y tesseract tesseract-langpack-deu && dnf clean all
+
 # 2. Scraper application code. bulk_run.py is the Fargate/ECS bulk entrypoint —
 #    the ECS task definition overrides the container entrypoint to
 #    `python bulk_run.py`, bypassing the Lambda runtime interface below.

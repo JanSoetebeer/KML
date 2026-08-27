@@ -20,3 +20,9 @@ scikit-learn>=1.5,<2.0
 pandas>=2.0
 joblib>=1.3
 PyMuPDF>=1.24
+
+# OCR fallback for scanned PDFs (optional — only when OCR_ENABLED=true). Also needs
+# the system 'tesseract-ocr' + 'deu' language pack (see Dockerfile note). Absent →
+# OCR degrades to a no-op.
+pytesseract>=0.3.10
+Pillow>=10.0

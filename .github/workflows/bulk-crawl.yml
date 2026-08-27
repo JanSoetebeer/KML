@@ -23,6 +23,11 @@ on:
         required: false
         default: ""
         type: string
+      render_js:
+        description: "Render JS pages via Firecrawl (for JS-heavy sites). Needs the FIRECRAWL_API_KEY repo secret. Costs Firecrawl credits per page — use for targeted runs."
+        required: false
+        default: false
+        type: boolean
       profile:
         description: "Extraction profile"
         required: true
@@ -137,6 +142,8 @@ jobs:
                 "environment": [
                   { "name": "BULK_URLS_S3",   "value": "${{ inputs.urls_s3 }}" },
                   { "name": "DISCOVERY_SEEDS_S3", "value": "${{ inputs.discovery_seeds_s3 }}" },
+                  { "name": "RENDER_JS",      "value": "${{ inputs.render_js }}" },
+                  { "name": "FIRECRAWL_API_KEY", "value": "${{ secrets.FIRECRAWL_API_KEY }}" },
                   { "name": "BULK_BATCH_ID",  "value": "$BATCH_ID" },
                   { "name": "CRAWL_PROFILE",  "value": "${{ inputs.profile }}" },
                   { "name": "BULK_MAX_JOBS",  "value": "${{ inputs.max_jobs }}" },

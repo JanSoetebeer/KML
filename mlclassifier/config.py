@@ -43,6 +43,18 @@ MIN_TEXT_CHARS = 200
 # bounded and avoids one 900-page file dominating. 0 disables the cap.
 MAX_TEXT_CHARS = 400_000
 
+# OCR fallback for scanned/image PDFs (those that extract as ``empty_document``:
+# a real page image but no text layer). Off by default — OCR is slow and needs
+# system binaries (tesseract-ocr + the ``deu`` language pack) plus the Python
+# ``pytesseract`` + ``Pillow`` packages. Enable per run with ``OCR_ENABLED=true``;
+# it degrades to a no-op (unchanged behaviour) if the deps are missing. In the
+# 411-uni run 2,074 PDFs were empty_document — this recovers the scanned handbooks
+# among them without a re-crawl (see mlclassifier/reprocess_ocr.py).
+OCR_ENABLED_DEFAULT = False
+OCR_MAX_PAGES = 15          # OCR at most this many pages/doc (handbooks front-load)
+OCR_DPI = 200               # rasterisation DPI: 200 balances accuracy vs speed
+OCR_LANG = "deu+eng"        # German handbooks, occasional English
+
 # --------------------------------------------------------------------------- #
 # Model / features
 # --------------------------------------------------------------------------- #
