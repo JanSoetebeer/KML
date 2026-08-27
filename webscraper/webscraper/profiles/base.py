@@ -102,6 +102,10 @@ class ExtractionProfile:
     #: File extensions treated as downloadable target resources. Empty ⇒ the
     #: profile downloads nothing and works purely via ``extract_page``.
     target_extensions = DEFAULT_TARGET_EXTENSIONS
+    #: Search terms for external discovery (search-engine seeding). Empty ⇒ the
+    #: profile is not discovered for — the crawl relies on link-following only.
+    #: See :mod:`webscraper.discovery`.
+    discovery_terms: tuple = ()
 
     # -- frontier control ------------------------------------------------------
 

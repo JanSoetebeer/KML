@@ -27,6 +27,7 @@
         { "name": "DYNAMODB_TABLE", "value": "webscraper-visited" },
         { "name": "CLASSIFIER_ENABLED", "value": "true" },
         { "name": "REVIEW_MANIFEST_DIR", "value": "/tmp/review" },
+        { "name": "CLASSIFIER_UPPER_THRESHOLD", "value": "0.50" },
 
         { "name": "CRAWL_PROFILE", "value": "modulhandbuch" },
 

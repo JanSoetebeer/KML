@@ -18,6 +18,11 @@ on:
         description: "s3:// URI of the URL list (.csv/.txt/.html) to crawl"
         required: true
         type: string
+      discovery_seeds_s3:
+        description: "s3:// URI of a discovered-URL JSONL (search-seeding). Optional — leave blank to disable."
+        required: false
+        default: ""
+        type: string
       profile:
         description: "Extraction profile"
         required: true
@@ -131,6 +136,7 @@ jobs:
                 "name": "webscraper-bulk",
                 "environment": [
                   { "name": "BULK_URLS_S3",   "value": "${{ inputs.urls_s3 }}" },
+                  { "name": "DISCOVERY_SEEDS_S3", "value": "${{ inputs.discovery_seeds_s3 }}" },
                   { "name": "BULK_BATCH_ID",  "value": "$BATCH_ID" },
                   { "name": "CRAWL_PROFILE",  "value": "${{ inputs.profile }}" },
                   { "name": "BULK_MAX_JOBS",  "value": "${{ inputs.max_jobs }}" },

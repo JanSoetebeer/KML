@@ -125,9 +125,15 @@ class DocumentSpider(BaseSpider):
 
     name = "document"
 
-    def __init__(self, start_url: str, *args, file_types=None, profile=None, **kwargs):
+    def __init__(self, start_url: str, *args, file_types=None, profile=None,
+                 extra_seeds=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_urls = [start_url]
+        # Document URLs discovered out-of-band (search-engine seeding — see
+        # webscraper.discovery). Fetched directly as high-priority targets in
+        # start_requests, so handbooks the link-crawl can't reach (deep, behind
+        # JS, or on a module-DB subdomain) are still downloaded and classified.
+        self.extra_seeds = list(extra_seeds or [])
         self.profile = get_profile(profile)
         # A ``file_types`` override widens/narrows what the profile downloads
         # without changing its scoring — one source of truth for targets.
@@ -179,6 +185,22 @@ class DocumentSpider(BaseSpider):
         yield scrapy.Request(
             seed, callback=self.parse, cb_kwargs={"depth": 0}, errback=self._on_error,
         )
+
+        # Discovered document URLs: fetch each directly as a target, above the
+        # crawl frontier (priority beats page follows and sitemap seeds). Only
+        # same-site URLs are honoured — discovery already scopes to the domain,
+        # this is the belt-and-braces guard the rest of the engine also uses.
+        for url in self.extra_seeds:
+            if not self._same_site(url):
+                continue
+            self.crawler.stats.inc_value("webscraper/files_found")
+            self.crawler.stats.inc_value("webscraper/discovery_seeded")
+            yield scrapy.Request(
+                url=url, callback=self._fetch_target,
+                cb_kwargs={"source_page": "discovery"},
+                priority=_DOCUMENT_BASE_PRIORITY + 500,
+                errback=self._on_error,
+            )
 
         if not self._use_sitemap:
             return

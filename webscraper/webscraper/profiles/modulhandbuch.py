@@ -16,12 +16,27 @@ from webscraper.profiles.base import KeywordScoredProfile
 class ModulhandbuchProfile(KeywordScoredProfile):
     name = "modulhandbuch"
     target_extensions = frozenset({".pdf", ".doc", ".docx"})
+    # Terms handed to the search-discovery stage (webscraper.discovery). Each is
+    # combined with the domain + ``filetype:pdf`` into a query. "modulebook"
+    # catches English TYPO3 exports (e.g. Konstanz) the crawler otherwise misses.
+    discovery_terms = (
+        "modulhandbuch", "modulbeschreibung", "modulhandbücher",
+        "module handbook", "modulebook", "modulkatalog",
+    )
 
     POSITIVE_TOKENS = {
         "modulhandbuch": 100, "modulhandbuecher": 100, "module-handbook": 100,
-        "modulbeschreibung": 60, "modulkatalog": 60,
+        # Real-world filename variants observed in crawl manifests but previously
+        # unscored: English TYPO3 exports ("modulebook_19_….pdf", e.g. Konstanz),
+        # the "MHB_…"/"…mhb…" abbreviation (Kiel, KIT, many faculties), and the
+        # standalone "handbuch_….pdf". Without these, best-first under-prioritises
+        # the very links that are handbooks, so a small page/item budget is spent
+        # elsewhere before reaching them.
+        "modulebook": 100, "mhb": 50, "handbuch": 40, "modul-handbuch": 100,
+        "modulbeschreibung": 60, "modulkatalog": 60, "modulubersicht": 40,
         "modul": 25, "module": 20,
         "pruefungsordnung": 35, "studienordnung": 35, "studienplan": 30,
+        "studienverlaufsplan": 30, "spo": 15, "stupo": 20,
         "curriculum": 30, "ordnung": 12,
         "studiengang": 20, "studiengaenge": 20, "studium": 15, "studies": 10,
         "bachelor": 15, "master": 15, "b-sc": 10, "m-sc": 10,

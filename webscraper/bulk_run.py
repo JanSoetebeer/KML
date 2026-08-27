@@ -14,6 +14,9 @@ overridable per launch via ``aws ecs run-task``):
     BULK_URLS_S3    s3://bucket/key of a URL list (.csv / .txt / .html). Preferred.
     BULK_URLS       Whitespace/comma-separated URLs (used only if BULK_URLS_S3 unset).
     BULK_BATCH_ID   Correlation id → s3://<bucket>/manifests/<id>.jsonl (default: uuid).
+    DISCOVERY_SEEDS_S3  s3://bucket/key of a discovered-URL JSONL (webscraper.discovery).
+                    Downloaded to /tmp and used as DISCOVERY_SEEDS_PATH — seeds each
+                    domain's handbook URLs into its crawl. Optional; unset ⇒ off.
     CRAWL_PROFILE   Extraction profile (e.g. modulhandbuch | generic | html-content).
     BULK_MAX_JOBS   Concurrent per-university crawls (default: MAX_CONCURRENT_JOBS).
     FILE_TYPES      Optional comma-separated extension override (e.g. "pdf,docx").
@@ -83,11 +86,35 @@ def _collect_urls() -> list[str]:
     return []
 
 
+def _stage_discovery_seeds() -> None:
+    """If DISCOVERY_SEEDS_S3 is set, download the discovered-URL JSONL to /tmp and
+    point DISCOVERY_SEEDS_PATH at it, so run_batch (via settings) picks it up.
+
+    A staging failure is logged and ignored — discovery is an optional recall
+    boost and must never abort the bulk crawl. Runs before ``run_batch`` imports
+    the settings module, so the env var is read at the right time.
+    """
+    s3_uri = os.getenv("DISCOVERY_SEEDS_S3", "").strip()
+    if not s3_uri:
+        return
+    try:
+        local = _download_s3(s3_uri)
+        os.environ["DISCOVERY_SEEDS_PATH"] = local
+        logger.info("Discovery seeds staged: %s → %s", s3_uri, local)
+    except Exception as exc:  # noqa: BLE001 — optional feature, never fatal
+        logger.warning("Discovery seeds staging failed for %s (%s); "
+                       "continuing without search-seeding.", s3_uri, exc)
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    # Stage optional discovery seeds into the env BEFORE run_batch imports the
+    # settings module (which reads DISCOVERY_SEEDS_PATH at import time).
+    _stage_discovery_seeds()
+
     # Imported lazily so logging is configured first and the module is only
     # loaded inside the container (keeps import errors localised to runtime).
     from run import run_batch

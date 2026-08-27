@@ -94,6 +94,12 @@ CRAWL_MAX_SUBDOMAIN_SITEMAPS = int(os.getenv("CRAWL_MAX_SUBDOMAIN_SITEMAPS", "15
 # Backstop: also stop a crawl after this many fetched pages (Scrapy built-in).
 CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
 
+# Search-discovery seeds (webscraper.discovery): path to a JSONL of document
+# URLs found out-of-band (search engine / Common Crawl), keyed by domain. When
+# set, each job seeds its domain's discovered URLs as high-priority targets,
+# recovering handbooks the link-crawl can't reach. Empty ⇒ discovery disabled.
+DISCOVERY_SEEDS_PATH = os.getenv("DISCOVERY_SEEDS_PATH", "")
+
 # ---------------------------------------------------------------------------
 # HTTP cache (speeds up re-runs during development; disable in production)
 # ---------------------------------------------------------------------------

@@ -105,6 +105,7 @@ class JobRunner:
         force: bool = False,
         file_types=None,
         profile=None,
+        discovery_seeds=None,
     ):
         self._settings = settings
         self._store = visited_store
@@ -112,6 +113,9 @@ class JobRunner:
         self._ping = ping
         self._force = force
         self._file_types = file_types
+        # {base_domain: [document urls]} from the discovery stage. Each job looks
+        # up its domain's URLs and hands them to the spider as extra seeds.
+        self._discovery_seeds = discovery_seeds or {}
         # Active extraction profile name; falls back to the settings default
         # (which itself defaults to "modulhandbuch") when not given.
         self._profile = profile or settings.get("CRAWL_PROFILE")
@@ -202,6 +206,9 @@ class JobRunner:
         logger.info("[%s] START job — %s", job_id, validated)
         # Create the crawler explicitly so we can read its stats afterwards.
         crawler = self._runner.create_crawler(DocumentSpider)
+        extra_seeds = self._seeds_for(validated)
+        if extra_seeds:
+            logger.info("[%s] seeding %d discovered URL(s)", job_id, len(extra_seeds))
         try:
             yield self._runner.crawl(
                 crawler,
@@ -209,6 +216,7 @@ class JobRunner:
                 job_id=job_id,
                 file_types=self._file_types,
                 profile=self._profile,
+                extra_seeds=extra_seeds,
             )
             self._store.mark_visited(validated, job_id)
             found, downloaded, size = _read_stats(crawler)
@@ -235,6 +243,16 @@ class JobRunner:
                     bytes_downloaded=size,
                 )
             )
+
+
+    def _seeds_for(self, url: str) -> list:
+        """Discovered document URLs for this job's registered domain (or [])."""
+        if not self._discovery_seeds:
+            return []
+        from webscraper.discovery.providers import _base_domain
+        from urllib.parse import urlparse
+        base = _base_domain(urlparse(url).hostname or "")
+        return self._discovery_seeds.get(base, [])
 
 
 def _read_stats(crawler) -> tuple[int, int, int]:

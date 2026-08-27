@@ -188,6 +188,17 @@ def run_batch(
 
     store = build_visited_store(settings)
 
+    # Optional search-discovery seeds: a JSONL of document URLs found out-of-band
+    # (see webscraper.discovery), keyed by domain. Absent/unset → normal crawl.
+    discovery_seeds = {}
+    seeds_path = settings.get("DISCOVERY_SEEDS_PATH", "")
+    if seeds_path:
+        from webscraper.discovery import load_discovery_seeds
+
+        discovery_seeds = load_discovery_seeds(seeds_path)
+        logger.info("Loaded discovery seeds for %d domain(s) from %s",
+                    len(discovery_seeds), seeds_path)
+
     # One job_id per URL
     jobs = [(url, uuid.uuid4().hex) for url in urls]
 
@@ -199,6 +210,7 @@ def run_batch(
         force=force,
         file_types=file_types,
         profile=profile,
+        discovery_seeds=discovery_seeds,
     )
     summary = runner.run(jobs)
 
