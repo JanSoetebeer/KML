@@ -60,18 +60,40 @@ def ingest_from_manifest(
     *,
     data_dir: Path | str = config.DEFAULT_DATA_DIR,
     decisions: set[str] | None = None,
+    bucket: str | None = None,
+    region: str | None = None,
+    verify_ssl: bool = True,
+    workers: int = 1,
 ) -> int:
     """
     Copy files listed in a review manifest into the training set under *label*.
 
     ``decisions`` optionally restricts to certain model decisions
     (e.g. ``{"needs_review"}``) so you only ingest the band you actually reviewed.
+    When ``bucket`` is given, files not present locally (``saved_path``) are
+    fetched from S3 by their ``s3_key`` — the path for ingesting a manifest from a
+    cloud run (e.g. the LLM-reviewed manifest) whose PDFs live only in S3.
+    ``workers`` > 1 downloads those S3 objects in parallel (I/O-bound), which is
+    much faster for thousands of files over a slow/proxied connection.
     """
     manifest_path = Path(manifest_path)
     data_dir = Path(data_dir)
     label_dir = _label_dirname(label)
 
-    n = 0
+    s3 = None
+    tmp_dir = None
+    if bucket:
+        import tempfile
+
+        import boto3
+
+        kw = {"verify": False} if not verify_ssl else {}
+        s3 = (boto3.client("s3", region_name=region, **kw) if region
+              else boto3.client("s3", **kw))
+        tmp_dir = Path(tempfile.mkdtemp(prefix="ingest_s3_"))
+
+    # Read + filter the entries up front so we can fan them out to a thread pool.
+    entries: list[dict] = []
     with manifest_path.open("r", encoding="utf-8") as fh:
         for line in fh:
             line = line.strip()
@@ -83,14 +105,38 @@ def ingest_from_manifest(
                 continue
             if decisions and entry.get("decision") not in decisions:
                 continue
-            src = Path(entry.get("saved_path", ""))
-            if not src.exists():
+            entries.append(entry)
+
+    def _process(item: tuple[int, dict]) -> int:
+        idx, entry = item
+        src = Path(entry.get("saved_path", ""))
+        if not src.exists():
+            key = entry.get("s3_key", "")
+            if s3 and key:
+                # Unique temp name per entry so parallel downloads never collide.
+                src = tmp_dir / f"{idx}_{entry.get('filename') or Path(key).name}"
+                try:
+                    s3.download_file(bucket, key, str(src))
+                except Exception as exc:  # noqa: BLE001 — skip a missing object
+                    logger.warning("S3 fetch failed for %s: %s", key, exc)
+                    return 0
+            else:
                 logger.warning("manifest file missing on disk: %s", src)
-                continue
-            group = entry.get("hostname") or "unknown"
-            if _copy_into(src, label_dir, group, data_dir):
-                n += 1
-    logger.info("ingested %d file(s) from manifest into %s/%s", n, data_dir.name, label_dir)
+                return 0
+        group = entry.get("hostname") or "unknown"
+        return 1 if _copy_into(src, label_dir, group, data_dir) else 0
+
+    items = list(enumerate(entries))
+    if workers > 1 and s3 is not None:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            n = sum(ex.map(_process, items))
+    else:
+        n = sum(_process(it) for it in items)
+
+    logger.info("ingested %d file(s) from manifest into %s/%s (of %d, workers=%d)",
+                n, data_dir.name, label_dir, len(entries), workers)
     return n
 
 

@@ -59,6 +59,9 @@ def _cmd_ingest(args) -> int:
         decisions = set(args.decision) if args.decision else None
         n = ingest_from_manifest(
             args.manifest, args.label, data_dir=args.data_dir, decisions=decisions,
+            bucket=getattr(args, "s3_bucket", None), region=getattr(args, "region", None),
+            verify_ssl=not getattr(args, "no_verify_ssl", False),
+            workers=getattr(args, "workers", 1),
         )
     else:
         n = ingest_paths(args.paths, args.label, data_dir=args.data_dir, group=args.group)
@@ -149,6 +152,17 @@ def build_parser() -> argparse.ArgumentParser:
                            "(repeatable, e.g. --decision needs_review).")
     p_ing.add_argument("--group", default=None,
                       help="Override the university/domain group (else parent folder).")
+    p_ing.add_argument("--s3-bucket", default=os.getenv("S3_BUCKET") or None,
+                      help="With --manifest: fetch PDFs from this S3 bucket by "
+                           "s3_key when they aren't present locally (cloud runs).")
+    p_ing.add_argument("--region", default=os.getenv("AWS_REGION")
+                      or os.getenv("AWS_DEFAULT_REGION"),
+                      help="AWS region for --s3-bucket.")
+    p_ing.add_argument("--no-verify-ssl", action="store_true",
+                      help="Disable TLS verification for S3 (local corporate proxy only).")
+    p_ing.add_argument("--workers", type=int, default=1,
+                      help="Parallel S3 downloads for --manifest --s3-bucket "
+                           "(default 1; try 12–20 for thousands of files).")
     p_ing.add_argument("--data-dir", default=str(config.DEFAULT_DATA_DIR))
     p_ing.set_defaults(func=_cmd_ingest)
 

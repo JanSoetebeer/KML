@@ -32,11 +32,18 @@ import sys
 from pathlib import Path
 
 # Load env (e.g. AWS creds for S3) from webscraper/.env regardless of cwd.
+# Best-effort — a missing package OR an unreadable .env must never crash the tool.
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parents[1] / "webscraper" / ".env")
-    load_dotenv()
+    try:
+        load_dotenv(Path(__file__).resolve().parents[1] / "webscraper" / ".env")
+    except OSError:
+        pass
+    try:
+        load_dotenv()
+    except OSError:
+        pass
 except ImportError:
     pass
 

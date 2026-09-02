@@ -45,12 +45,20 @@ import sys
 from pathlib import Path
 
 # Load Bedrock creds (AWS_BEARER_TOKEN_BEDROCK / AWS_REGION) from webscraper/.env
-# regardless of cwd, plus any .env in the working directory.
+# regardless of cwd, plus any .env in the working directory. Best-effort — a
+# missing dotenv package OR an unreadable .env (e.g. root-owned 0600 on the
+# server, where creds come from the real env anyway) must never crash the tool.
 try:
     from dotenv import load_dotenv
 
-    load_dotenv(Path(__file__).resolve().parents[1] / "webscraper" / ".env")
-    load_dotenv()
+    try:
+        load_dotenv(Path(__file__).resolve().parents[1] / "webscraper" / ".env")
+    except OSError:
+        pass
+    try:
+        load_dotenv()
+    except OSError:
+        pass
 except ImportError:
     pass
 
