@@ -354,8 +354,65 @@ def _fargate_subnets(region: str) -> list[str]:
     return [s["SubnetId"] for s in subs.get("Subnets", [])]
 
 
+def _run_discovery_to_s3(urls: list[str], job_id: str, region: str, bucket: str,
+                         profile: str | None, providers: list[str]) -> str | None:
+    """Run search-discovery for *urls* with *providers* and upload the seeds to S3.
+
+    Returns the ``s3://`` URI of the discovered-URL JSONL (to pass as
+    ``DISCOVERY_SEEDS_S3``), or ``None`` when *providers* is empty or nothing was
+    found. Keys come from the webapp env (SERPER_API_KEY / FIRECRAWL_API_KEY).
+    Never raises — a discovery failure just means the crawl runs without seeds.
+    """
+    if not providers:
+        return None
+    try:
+        import json as _json
+
+        import boto3
+        from webscraper.discovery import (
+            discover_for_domains,
+            domains_from_urls,
+            get_provider,
+        )
+        from webscraper.discovery.providers import UnionProvider
+        from webscraper.profiles import get_profile
+
+        prof = get_profile(profile)
+        terms = list(getattr(prof, "discovery_terms", ())) or None
+        stems = getattr(prof, "discovery_url_stems", ()) or None
+        built = [get_provider(
+            name,
+            serper_key=os.getenv("SERPER_API_KEY", ""),
+            firecrawl_key=os.getenv("FIRECRAWL_API_KEY", ""),
+            serper_num=int(os.getenv("SERPER_NUM", "10")),
+            serper_filetype=os.getenv("SERPER_FILETYPE", "false").lower() == "true",
+            per_query_delay=0.5 if name == "commoncrawl" else 0.2,
+            max_results=int(os.getenv("DISCOVERY_MAX_RESULTS", "25")),
+            url_stems=stems,
+        ) for name in providers]
+        provider = built[0] if len(built) == 1 else UnionProvider(
+            built, max_results=int(os.getenv("DISCOVERY_MAX_RESULTS", "25")))
+
+        results = discover_for_domains(domains_from_urls(urls), provider, terms=terms)
+        lines = [_json.dumps({"domain": d, "url": u}, ensure_ascii=False)
+                 for d, us in results.items() for u in us]
+        if not lines:
+            return None
+        key = f"discovery/{job_id}.jsonl"
+        boto3.client("s3", region_name=region).put_object(
+            Bucket=bucket, Key=key, Body=("\n".join(lines)).encode("utf-8"),
+            ContentType="application/x-ndjson",
+        )
+        _append_log([f"[{job_id}] discovery: {len(lines)} seed URL(s) → s3://{bucket}/{key}"])
+        return f"s3://{bucket}/{key}"
+    except Exception as exc:  # noqa: BLE001 — discovery is a boost, never a blocker
+        _append_log([f"[{job_id}] discovery skipped ({exc})"])
+        return None
+
+
 def _dispatch_bulk(
-    job_id: str, urls: list[str], file_types: list[str], profile: str | None = None
+    job_id: str, urls: list[str], file_types: list[str], profile: str | None = None,
+    use_discovery: bool = False, render_js: bool = False,
 ) -> tuple[bool, str, dict | None]:
     """
     Launch a Fargate bulk crawl for *urls*.
@@ -399,6 +456,23 @@ def _dispatch_bulk(
             env.append({"name": "CRAWL_PROFILE", "value": profile})
         if file_types:
             env.append({"name": "FILE_TYPES", "value": ",".join(file_types)})
+
+        # Search-discovery seeds — find handbook URLs the link-crawl can't reach.
+        # Per-request (the frontend switch) OR the WEBAPP_DISCOVERY_PROVIDERS env
+        # default; providers list from env, or free Common Crawl if unset.
+        want_discovery = use_discovery or os.getenv("WEBAPP_DISCOVERY_PROVIDERS", "").strip()
+        if want_discovery:
+            providers = os.getenv("WEBAPP_DISCOVERY_PROVIDERS", "").split() or ["commoncrawl"]
+            seeds_s3 = _run_discovery_to_s3(urls, job_id, region, bucket, profile, providers)
+            if seeds_s3:
+                env.append({"name": "DISCOVERY_SEEDS_S3", "value": seeds_s3})
+        # JS rendering — per-request switch OR the RENDER_JS env default.
+        if render_js or os.getenv("RENDER_JS", "false").lower() == "true":
+            env.append({"name": "RENDER_JS", "value": "true"})
+            if os.getenv("FIRECRAWL_API_KEY"):
+                env.append({"name": "FIRECRAWL_API_KEY", "value": os.getenv("FIRECRAWL_API_KEY")})
+            else:
+                _append_log([f"[{job_id}] RENDER_JS requested but FIRECRAWL_API_KEY not set — rendering off"])
 
         resp = boto3.client("ecs", region_name=region).run_task(
             cluster=cluster,
@@ -451,11 +525,18 @@ def _execute_scrape(
     model_label: str,
     username: str,
     position: str,
+    use_discovery: bool = False,
+    render_js: bool = False,
 ) -> None:
     """Background worker: run the scrape and record its outcome + log lines."""
     now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     payload = {"urls": urls, "file_types": selected, "job_id": job_id}
     backend = _choose_backend(len(urls))
+    # Discovery + JS rendering only run on the Fargate bulk backend — force it
+    # when the user asked for either (and it's configured), so a small URL list
+    # doesn't silently fall back to Lambda and skip them.
+    if (use_discovery or render_js) and _bulk_available():
+        backend = "bulk"
 
     _append_log(
         [
@@ -470,7 +551,10 @@ def _execute_scrape(
     )
 
     if backend == "bulk":
-        ok, detail, summary = _dispatch_bulk(job_id, urls, selected)
+        ok, detail, summary = _dispatch_bulk(
+            job_id, urls, selected,
+            use_discovery=use_discovery, render_js=render_js,
+        )
     else:
         ok, detail, summary = _run_scrape(payload)
 
@@ -506,6 +590,8 @@ def start_scrape(
     file_types: str = Form(""),
     model_id: int | None = Form(None),
     url: str = Form(""),
+    use_discovery: bool = Form(False),
+    render_js: bool = Form(False),
     file: UploadFile | None = File(None),
     user: dict = Depends(get_current_user),
 ):
@@ -595,6 +681,7 @@ def start_scrape(
     thread = threading.Thread(
         target=_execute_scrape,
         args=(job_id, urls, selected, model_label, user["username"], user["position"]),
+        kwargs={"use_discovery": use_discovery, "render_js": render_js},
         daemon=True,
     )
     thread.start()

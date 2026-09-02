@@ -437,8 +437,20 @@ echo "webscraper webapp bootstrap complete at `$(date -u)"
     --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$InstanceTag}]" `
     --query "Instances[0].InstanceId" --output text --region $Region).Trim()
   Ok "launched instance $InstanceId"
-  aws ec2 associate-address --instance-id $InstanceId --allocation-id $Alloc --region $Region | Out-Null
-  Ok "associated Elastic IP $PubIp  ->  app will be at https://$PubIp (allow ~5 min for first boot/build)"
+  # Associating an EIP to a still-pending instance can fail; wait until it's
+  # running first, then associate and VERIFY (a silent miss here leaves the box
+  # on an auto-assigned IP that doesn't match SITE_ADDRESS -> blank page).
+  Say "waiting for instance to reach 'running' before associating the Elastic IP ..."
+  aws ec2 wait instance-running --instance-ids $InstanceId --region $Region
+  foreach ($try in 1..3) {
+    aws ec2 associate-address --instance-id $InstanceId --allocation-id $Alloc --region $Region | Out-Null
+    $curIp = (aws ec2 describe-instances --instance-ids $InstanceId `
+      --query "Reservations[0].Instances[0].PublicIpAddress" --output text --region $Region 2>$null).Trim()
+    if ($curIp -eq $PubIp) { break }
+    Say "public IP is $curIp, expected EIP $PubIp (attempt $try/3) - retrying associate in 5s ..."; Start-Sleep -Seconds 5
+  }
+  if ($curIp -eq $PubIp) { Ok "associated Elastic IP $PubIp  ->  app at https://$PubIp (first boot/build ~5 min)" }
+  else { Say "WARNING: EIP association not confirmed (instance IP=$curIp). Associate manually: aws ec2 associate-address --instance-id $InstanceId --allocation-id $Alloc --region $Region" }
 }
 } # end -SkipEc2
 

@@ -613,6 +613,8 @@ function setupStart() {
       const modelId = document.getElementById("sc-model").value;
       if (modelId) fd.append("model_id", modelId); // optional bis Modell existiert
       fd.append("url", document.getElementById("sc-url").value.trim());
+      fd.append("use_discovery", document.getElementById("sc-discovery").checked ? "true" : "false");
+      fd.append("render_js", document.getElementById("sc-render").checked ? "true" : "false");
       const fileInput = document.getElementById("sc-file");
       if (fileInput.files.length) fd.append("file", fileInput.files[0]);
 

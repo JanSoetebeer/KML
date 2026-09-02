@@ -60,6 +60,19 @@
       </div>
 
       <div class="card">
+        <h2>Suchoptionen <span class="muted">(optional)</span></h2>
+        <label style="display:block; margin:6px 0">
+          <input type="checkbox" id="sc-discovery" style="width:auto" />
+          Suchmaschinen-Discovery (findet Modulhandbücher, die der Crawler nicht direkt verlinkt findet)
+        </label>
+        <label style="display:block; margin:6px 0">
+          <input type="checkbox" id="sc-render" style="width:auto" />
+          JavaScript-Rendering (für JS-lastige Seiten; verbraucht Firecrawl-Credits)
+        </label>
+        <p class="muted">Discovery + Rendering laufen auf dem Bulk-Backend (AWS Fargate).</p>
+      </div>
+
+      <div class="card">
         <div class="btn-row">
           <button id="sc-start" disabled>Scrapen starten</button>
           <span class="muted" id="sc-hint"></span>

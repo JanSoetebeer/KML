@@ -39,6 +39,17 @@ services:
       ECS_CLUSTER: ${ECS_CLUSTER:-webscraper-bulk}
       ECS_TASK_FAMILY: ${ECS_TASK_FAMILY:-webscraper-bulk}
       BULK_URL_THRESHOLD: ${BULK_URL_THRESHOLD:-10}
+      # Search-discovery + JS-rendering for the crawl (see webapp scrape router).
+      # WEBAPP_DISCOVERY_PROVIDERS enables discovery (e.g. "serper commoncrawl");
+      # keys are the same ones the discovery module reads. RENDER_JS turns on
+      # Firecrawl page rendering. All optional — unset = plain crawl.
+      WEBAPP_DISCOVERY_PROVIDERS: ${WEBAPP_DISCOVERY_PROVIDERS:-}
+      SERPER_API_KEY: ${SERPER_API_KEY:-}
+      SERPER_NUM: ${SERPER_NUM:-10}
+      SERPER_FILETYPE: ${SERPER_FILETYPE:-false}
+      DISCOVERY_MAX_RESULTS: ${DISCOVERY_MAX_RESULTS:-25}
+      FIRECRAWL_API_KEY: ${FIRECRAWL_API_KEY:-}
+      RENDER_JS: ${RENDER_JS:-false}
       # Persistent paths inside the mounted volume.
       APP_DB_PATH: /data/app.db
       LOG_FILE: /data/Log.txt

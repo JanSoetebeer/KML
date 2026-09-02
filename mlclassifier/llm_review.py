@@ -121,6 +121,9 @@ def main(argv=None) -> int:
                     or os.getenv("AWS_DEFAULT_REGION") or "us-east-1")
     ap.add_argument("--max-chars", type=int, default=8000,
                     help="chars of document text sent to the model (cost control)")
+    ap.add_argument("--workers", type=int, default=int(os.getenv("BEDROCK_WORKERS", "12")),
+                    help="parallel Bedrock calls (default 12 — cuts a 5-6h run to "
+                         "~30min; lower it if you hit Bedrock throttling)")
     ap.add_argument("--no-verify-ssl", action="store_true",
                     default=os.getenv("BEDROCK_VERIFY_SSL", "true").lower() == "false",
                     help="disable TLS verification — LOCAL use only, for a corporate "
@@ -153,45 +156,62 @@ def main(argv=None) -> int:
     logger.info("manifest: %d docs, %d in '%s' band to review", len(records), len(targets), args.band)
 
     from collections import Counter
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Lock
+
     verdicts: Counter = Counter()
-    n_pos = n_err = 0
-    with open(args.out, "w", encoding="utf-8") as fh:
-        for i, rec in enumerate(targets, 1):
-            content = _load_bytes(rec, args.bucket, s3_client)
-            if content is None:
-                continue
-            doc = extract_document_bytes(content, rec.get("filename", "unknown"))
-            if doc.get("extraction_status") != STATUS_OK or not doc.get("text", "").strip():
+    counters = {"pos": 0, "err": 0, "done": 0}
+    lock = Lock()  # guards the manifest file, the Counter, and the progress ints
+
+    def _review_one(rec: dict, fh) -> None:
+        content = _load_bytes(rec, args.bucket, s3_client)
+        if content is None:
+            with lock:
+                verdicts["no_bytes"] += 1
+            return
+        doc = extract_document_bytes(content, rec.get("filename", "unknown"))
+        if doc.get("extraction_status") != STATUS_OK or not doc.get("text", "").strip():
+            with lock:
                 verdicts["no_text"] += 1
-                continue
-            try:
-                v = _classify(client, args.model, system_prompt, rec.get("filename", ""),
-                              doc.get("title", ""), doc["text"], args.max_chars)
-            except Exception as exc:  # noqa: BLE001 — one bad doc must not abort the batch
-                logger.warning("LLM classify failed for %s: %s", rec.get("filename"), exc)
-                n_err += 1
-                continue
-            is_match = bool(v.get("is_match"))
+            return
+        try:
+            v = _classify(client, args.model, system_prompt, rec.get("filename", ""),
+                          doc.get("title", ""), doc["text"], args.max_chars)
+        except Exception as exc:  # noqa: BLE001 — one bad doc must not abort the batch
+            logger.warning("LLM classify failed for %s: %s", rec.get("filename"), exc)
+            with lock:
+                counters["err"] += 1
+            return
+        is_match = bool(v.get("is_match"))
+        updated = {
+            **rec,
+            "decision": "automatic_positive" if is_match else "automatic_negative",
+            "is_module_handbook": is_match,   # kept for the existing eval schema
+            "llm_is_match": is_match,
+            "llm_spec": spec.name,
+            "llm_confidence": v.get("confidence"),
+            "llm_reason": v.get("reason", ""),
+            "llm_model": args.model,
+            "llm_reviewed": True,
+        }
+        line = json.dumps(updated, ensure_ascii=False) + "\n"
+        with lock:  # the anthropic/httpx client is thread-safe; the file write isn't
             verdicts["positive" if is_match else "negative"] += 1
-            n_pos += int(is_match)
-            updated = {
-                **rec,
-                "decision": "automatic_positive" if is_match else "automatic_negative",
-                "is_module_handbook": is_match,   # kept for the existing eval schema
-                "llm_is_match": is_match,
-                "llm_spec": spec.name,
-                "llm_confidence": v.get("confidence"),
-                "llm_reason": v.get("reason", ""),
-                "llm_model": args.model,
-                "llm_reviewed": True,
-            }
-            fh.write(json.dumps(updated, ensure_ascii=False) + "\n")
-            if i % 50 == 0:
-                logger.info("  … %d/%d  (positive so far: %d)", i, len(targets), n_pos)
+            counters["pos"] += int(is_match)
+            counters["done"] += 1
+            fh.write(line)
+            if counters["done"] % 100 == 0:
+                logger.info("  … %d/%d  (positive so far: %d)",
+                            counters["done"], len(targets), counters["pos"])
+
+    # Parallel Bedrock calls — I/O-bound (S3 fetch + HTTP), so threads scale well.
+    with open(args.out, "w", encoding="utf-8") as fh:
+        with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+            list(pool.map(lambda r: _review_one(r, fh), targets))
 
     logger.info("done: %d reviewed → %s", sum(verdicts.values()), dict(verdicts))
-    logger.info("recovered as handbooks: %d  |  errors: %d", n_pos, n_err)
-    logger.info("wrote %s", args.out)
+    logger.info("recovered as handbooks: %d  |  errors: %d", counters["pos"], counters["err"])
+    logger.info("wrote %s (workers=%d)", args.out, args.workers)
     return 0
 
 
