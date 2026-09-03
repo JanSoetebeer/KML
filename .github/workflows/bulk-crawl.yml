@@ -69,6 +69,11 @@ on:
         required: false
         default: false
         type: boolean
+      seeds_only:
+        description: "Seed-only re-run: fetch ONLY the discovery seeds, don't re-crawl the sites (duplicate-free top-up of already-crawled unis). Needs discovery_seeds_s3."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -151,7 +156,8 @@ jobs:
                   { "name": "CRAWL_MAX_DEPTH","value": "${{ inputs.max_depth }}" },
                   { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" },
                   { "name": "CRAWL_MAX_SUBDOMAIN_SITEMAPS","value": "${{ inputs.subdomain_sitemaps }}" },
-                  { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" }
+                  { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" },
+                  { "name": "BULK_SEEDS_ONLY","value": "${{ inputs.seeds_only }}" }
                 ]
               }
             ]

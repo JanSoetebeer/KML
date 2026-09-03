@@ -45,6 +45,13 @@ from webscraper.utils.url_sources import extract_urls_from_csv_text
 def _read_domains(args) -> list[str]:
     if args.domains:
         return domains_from_urls(args.domains)
+    if args.urls_file:
+        # One URL or domain per line ('#' comments + blanks ignored). Collapsed to
+        # unique base domains — the natural input for a gap-uni re-run (feed the
+        # per-uni report's seed_url column, or a plain domain list).
+        lines = Path(args.urls_file).read_text(encoding="utf-8", errors="replace").splitlines()
+        entries = [l.strip() for l in lines if l.strip() and not l.strip().startswith("#")]
+        return domains_from_urls(entries)
     text = Path(args.csv).read_text(encoding="utf-8", errors="replace")
     return domains_from_urls(extract_urls_from_csv_text(text))
 
@@ -56,6 +63,9 @@ def main(argv=None) -> int:
     src = ap.add_mutually_exclusive_group(required=True)
     src.add_argument("--csv", help="university seed list (Hochschul-CSV)")
     src.add_argument("--domains", nargs="+", help="explicit domains (skip the CSV)")
+    src.add_argument("--urls-file", help="file with one URL/domain per line "
+                     "('#' comments allowed) — e.g. the gap-uni list from the "
+                     "per-uni diagnostics report")
     ap.add_argument("--provider", nargs="+", default=["commoncrawl"],
                     choices=["commoncrawl", "duckduckgo", "google", "serper", "firecrawl"],
                     help="one or more providers; multiple are unioned per domain "
