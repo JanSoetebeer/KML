@@ -151,6 +151,7 @@ def main() -> int:
         batch_id=os.getenv("BULK_BATCH_ID") or uuid.uuid4().hex,
         file_types=file_types,
         profile=os.getenv("CRAWL_PROFILE"),
+        seeds_only=os.getenv("BULK_SEEDS_ONLY", "false").lower() == "true",
     )
 
 

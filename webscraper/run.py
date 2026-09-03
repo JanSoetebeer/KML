@@ -76,6 +76,13 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="Re-scrape URLs even if already recorded in the visited store.",
     )
     parser.add_argument(
+        "--seeds-only",
+        action="store_true",
+        help="Fetch ONLY discovery seeds (no site crawl) — a duplicate-free "
+        "re-run that adds newly-discovered documents to already-crawled "
+        "universities. Needs DISCOVERY_SEEDS_PATH; bypasses the visited store.",
+    )
+    parser.add_argument(
         "--log-level",
         default=os.getenv("LOG_LEVEL", "INFO"),
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -157,6 +164,7 @@ def run_batch(
     batch_id: str | None = None,
     file_types=None,
     profile: str | None = None,
+    seeds_only: bool | None = None,
 ) -> int:
     """
     Run a batch of URLs as concurrent jobs.
@@ -188,6 +196,11 @@ def run_batch(
 
     store = build_visited_store(settings)
 
+    # Seed-only re-run (crawl only discovery seeds). Falls back to the SEEDS_ONLY
+    # env var so the bulk/Fargate path (bulk_run → run_batch) can enable it too.
+    if seeds_only is None:
+        seeds_only = os.getenv("SEEDS_ONLY", "false").lower() == "true"
+
     # Optional search-discovery seeds: a JSONL of document URLs found out-of-band
     # (see webscraper.discovery), keyed by domain. Absent/unset → normal crawl.
     discovery_seeds = {}
@@ -198,6 +211,10 @@ def run_batch(
         discovery_seeds = load_discovery_seeds(seeds_path)
         logger.info("Loaded discovery seeds for %d domain(s) from %s",
                     len(discovery_seeds), seeds_path)
+
+    if seeds_only and not discovery_seeds:
+        logger.warning("--seeds-only/SEEDS_ONLY set but no discovery seeds loaded "
+                       "(DISCOVERY_SEEDS_PATH unset/empty) — nothing will be fetched.")
 
     # One job_id per URL
     jobs = [(url, uuid.uuid4().hex) for url in urls]
@@ -211,6 +228,7 @@ def run_batch(
         file_types=file_types,
         profile=profile,
         discovery_seeds=discovery_seeds,
+        seeds_only=seeds_only,
     )
     summary = runner.run(jobs)
 
@@ -262,6 +280,7 @@ def main(argv=None) -> None:
         batch_id=args.batch_id,
         file_types=_parse_file_types(args.file_types),
         profile=args.profile,
+        seeds_only=args.seeds_only,
     )
     sys.exit(exit_code)
 

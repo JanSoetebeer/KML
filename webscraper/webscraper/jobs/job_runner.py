@@ -106,6 +106,7 @@ class JobRunner:
         file_types=None,
         profile=None,
         discovery_seeds=None,
+        seeds_only=False,
     ):
         self._settings = settings
         self._store = visited_store
@@ -113,6 +114,13 @@ class JobRunner:
         self._ping = ping
         self._force = force
         self._file_types = file_types
+        # Seed-only re-run: crawl ONLY the discovery seeds, never the site. Used
+        # to add newly-discovered deep documents to already-crawled universities
+        # without re-downloading anything. Implies running even when the domain
+        # is already in the visited store (that's the whole point), and skips
+        # domains that have no seeds so a 400-uni re-run only touches the ~150
+        # with fresh discovery hits.
+        self._seeds_only = bool(seeds_only)
         # {base_domain: [document urls]} from the discovery stage. Each job looks
         # up its domain's URLs and hands them to the spider as extra seeds.
         self._discovery_seeds = discovery_seeds or {}
@@ -185,7 +193,10 @@ class JobRunner:
     @defer.inlineCallbacks
     def _run_one(self, url: str, job_id: str):  # noqa: D401
         # --- dedup guard ------------------------------------------------------
-        if not self._force and self._store.has_visited(url):
+        # Seed-only re-runs deliberately target already-visited universities to
+        # add newly-discovered documents, so the visited-store skip is bypassed
+        # for them (no separate --force needed).
+        if not self._force and not self._seeds_only and self._store.has_visited(url):
             logger.info(
                 "[%s] SKIP — already scraped: %s", job_id, normalize_url(url)
             )
@@ -209,6 +220,15 @@ class JobRunner:
         extra_seeds = self._seeds_for(validated)
         if extra_seeds:
             logger.info("[%s] seeding %d discovered URL(s)", job_id, len(extra_seeds))
+        # Seed-only mode with nothing to seed for this domain → nothing to do;
+        # skip fast instead of spinning up a crawler that fetches nothing.
+        if self._seeds_only and not extra_seeds:
+            logger.info("[%s] SKIP (seeds_only) — no discovery seeds: %s",
+                        job_id, validated)
+            self._summary.add(
+                JobResult(validated, job_id, "skipped", "seeds_only: no seeds")
+            )
+            return
         try:
             yield self._runner.crawl(
                 crawler,
@@ -217,6 +237,7 @@ class JobRunner:
                 file_types=self._file_types,
                 profile=self._profile,
                 extra_seeds=extra_seeds,
+                seeds_only=self._seeds_only,
             )
             self._store.mark_visited(validated, job_id)
             found, downloaded, size = _read_stats(crawler)

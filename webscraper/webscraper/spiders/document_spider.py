@@ -126,7 +126,7 @@ class DocumentSpider(BaseSpider):
     name = "document"
 
     def __init__(self, start_url: str, *args, file_types=None, profile=None,
-                 extra_seeds=None, **kwargs):
+                 extra_seeds=None, seeds_only=False, **kwargs):
         super().__init__(*args, **kwargs)
         self.start_urls = [start_url]
         # Document URLs discovered out-of-band (search-engine seeding — see
@@ -134,6 +134,13 @@ class DocumentSpider(BaseSpider):
         # start_requests, so handbooks the link-crawl can't reach (deep, behind
         # JS, or on a module-DB subdomain) are still downloaded and classified.
         self.extra_seeds = list(extra_seeds or [])
+        # Seed-only mode: fetch ONLY the discovery seeds and skip crawling the
+        # site itself (no start-URL page follow, no sitemap/robots discovery).
+        # Purpose: a cheap, duplicate-free *re-run* over already-crawled
+        # universities that adds just the newly-discovered deep documents —
+        # nothing already downloaded is fetched again. Combine with discovery
+        # seeds; on its own (no seeds for a domain) it fetches nothing.
+        self.seeds_only = bool(seeds_only)
         self.profile = get_profile(profile)
         # A ``file_types`` override widens/narrows what the profile downloads
         # without changing its scoring — one source of truth for targets.
@@ -179,12 +186,17 @@ class DocumentSpider(BaseSpider):
         )
 
     def start_requests(self):
-        """Seed the crawl: the start URL, plus sitemap discovery (if enabled)."""
+        """Seed the crawl: the start URL, plus sitemap discovery (if enabled).
+
+        In ``seeds_only`` mode only the discovery seeds are fetched — the start
+        URL and sitemap/robots discovery are skipped entirely.
+        """
         self._init_limits()
         seed = self.start_urls[0]
-        yield scrapy.Request(
-            seed, callback=self.parse, cb_kwargs={"depth": 0}, errback=self._on_error,
-        )
+        if not self.seeds_only:
+            yield scrapy.Request(
+                seed, callback=self.parse, cb_kwargs={"depth": 0}, errback=self._on_error,
+            )
 
         # Discovered document URLs: fetch each directly as a target, above the
         # crawl frontier (priority beats page follows and sitemap seeds). Only
@@ -201,6 +213,16 @@ class DocumentSpider(BaseSpider):
                 priority=_DOCUMENT_BASE_PRIORITY + 500,
                 errback=self._on_error,
             )
+
+        # Seed-only: the site itself is deliberately not crawled — return before
+        # any page follow or sitemap discovery.
+        if self.seeds_only:
+            if not self.extra_seeds:
+                logger.warning(
+                    "[%s] seeds_only set but no discovery seeds for this domain — "
+                    "nothing to fetch.", self.job_id,
+                )
+            return
 
         if not self._use_sitemap:
             return

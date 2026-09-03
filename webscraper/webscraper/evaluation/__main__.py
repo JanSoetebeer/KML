@@ -56,6 +56,17 @@ def main(argv=None) -> int:
                          "re-processing manifest AFTER the run manifest to override it")
     ap.add_argument("--out-html", default="evaluation_report.html")
     ap.add_argument("--out-json", default="evaluation_data.json")
+    ap.add_argument("--out-per-uni", default=None,
+                    help="also write a per-university diagnostics CSV (manual "
+                         "work list: which unis need JS/manual/discovery). Writes "
+                         "a matching .json next to it.")
+    ap.add_argument("--discovery", default=None,
+                    help="discovered-URL JSONL (webscraper.discovery output) to "
+                         "cross-reference: per-uni report shows seeds found vs. "
+                         "actually downloaded (robots/JS tell-tale).")
+    ap.add_argument("--low-recall", type=int, default=3,
+                    help="per-uni: positive count below which a uni is flagged "
+                         "'low_recall' for a discovery/JS retry (default 3).")
     args = ap.parse_args(argv)
 
     for p in args.manifest + [args.csv]:
@@ -84,6 +95,31 @@ def main(argv=None) -> int:
                    default=_json_default),
         encoding="utf-8")
     print(f"Wrote {args.out_html} and {args.out_json}", file=sys.stderr)
+
+    if args.out_per_uni:
+        from webscraper.evaluation.per_uni import (
+            build_per_uni_rows, summarize_rows, write_per_uni_csv, write_per_uni_json,
+        )
+
+        discovery_seeds = {}
+        if args.discovery:
+            if not Path(args.discovery).exists():
+                print(f"error: discovery file not found: {args.discovery}", file=sys.stderr)
+                return 2
+            from webscraper.discovery import load_discovery_seeds
+            discovery_seeds = load_discovery_seeds(args.discovery)
+            print(f"  discovery seeds for {len(discovery_seeds)} domain(s) from "
+                  f"{args.discovery}", file=sys.stderr)
+
+        rows = build_per_uni_rows(ev, discovery_seeds=discovery_seeds,
+                                  low_recall=args.low_recall)
+        csv_path = args.out_per_uni
+        json_path = str(Path(csv_path).with_suffix(".json"))
+        write_per_uni_csv(rows, csv_path)
+        write_per_uni_json(rows, json_path)
+        print(f"  per-uni flags: {summarize_rows(rows)}", file=sys.stderr)
+        print(f"Wrote {csv_path} and {json_path}", file=sys.stderr)
+
     return 0
 
 

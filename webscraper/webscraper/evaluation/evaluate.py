@@ -380,6 +380,10 @@ def build_evaluation(
         "Decisions from model '{}'. 'needs_review' = uncertain band between the "
         "classifier's lower/upper thresholds; a human reviews those."
     ).format(records[0].get("model_version", "n/a") if records else "n/a")
+    # Stash the final (merged + rescored) records for downstream consumers such
+    # as the per-uni diagnostics report. Not a dataclass field, so it is dropped
+    # by ``dataclasses.asdict`` when the evaluation is serialised to JSON.
+    ev._records = records  # type: ignore[attr-defined]
     return ev
 
 
