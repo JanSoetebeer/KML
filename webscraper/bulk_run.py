@@ -106,11 +106,41 @@ def _stage_discovery_seeds() -> None:
                        "continuing without search-seeding.", s3_uri, exc)
 
 
+def _arm_runtime_watchdog() -> None:
+    """Guarantee the Fargate task terminates — the cost safety net.
+
+    A single hung crawl (stuck request, a reactor deadlock, or a blocking
+    render call) would leave ``reactor.run()`` blocking forever, so the task
+    would run — and bill — indefinitely. This daemon thread hard-exits the
+    process after ``BULK_MAX_RUNTIME_SECONDS`` (default 6h) no matter what
+    Twisted is doing, which stops the ECS task and therefore the billing.
+    ``os._exit`` is deliberate: it cannot be swallowed by the reactor the way
+    ``sys.exit`` / an exception can.
+    """
+    import threading
+
+    max_s = int(os.getenv("BULK_MAX_RUNTIME_SECONDS", "21600"))  # 6h
+    if max_s <= 0:
+        return
+
+    def _kill() -> None:
+        logger.error("BULK_MAX_RUNTIME_SECONDS=%d reached — force-exiting so the "
+                     "ECS task stops (cost safety net).", max_s)
+        os._exit(2)
+
+    t = threading.Timer(max_s, _kill)
+    t.daemon = True
+    t.start()
+    logger.info("Runtime watchdog armed: hard-exit after %d s.", max_s)
+
+
 def main() -> int:
     logging.basicConfig(
         level=os.getenv("LOG_LEVEL", "INFO"),
         format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     )
+    # Cost safety net FIRST: guarantee the task ends even if a crawl hangs.
+    _arm_runtime_watchdog()
     # Stage optional discovery seeds into the env BEFORE run_batch imports the
     # settings module (which reads DISCOVERY_SEEDS_PATH at import time).
     _stage_discovery_seeds()

@@ -153,6 +153,10 @@ class DocumentSpider(BaseSpider):
         if self._seed_domain:
             self.allowed_domains = [self._seed_domain]
         self._pages_crawled = 0
+        # Pages followed per top-level path section (≈ faculty, e.g. "mi",
+        # "psychologie"), for the breadth-fairness cap that stops the crawl from
+        # tunnelling its whole budget into one faculty. See _init_limits.
+        self._section_pages: dict[str, int] = {}
         # Subdomains whose sitemap we've already fetched (seed + discovered
         # faculty subdomains), so each is discovered at most once.
         self._sitemapped_subdomains: set[str] = set()
@@ -180,10 +184,29 @@ class DocumentSpider(BaseSpider):
         self._max_sitemap_urls = s.getint("CRAWL_MAX_SITEMAP_URLS", 50) if s else 50
         self._max_child_sitemaps = s.getint("CRAWL_MAX_CHILD_SITEMAPS", 10) if s else 10
         self._max_subdomain_sitemaps = s.getint("CRAWL_MAX_SUBDOMAIN_SITEMAPS", 15) if s else 15
+        self._max_pages_per_section = s.getint("CRAWL_MAX_PAGES_PER_SECTION", 0) if s else 0
         logger.info(
-            "[%s] crawl limits — max_depth=%d max_pages=%d sitemap=%s",
-            self.job_id, self._max_depth, self._max_pages, self._use_sitemap,
+            "[%s] crawl limits — max_depth=%d max_pages=%d per_section=%d sitemap=%s",
+            self.job_id, self._max_depth, self._max_pages,
+            self._max_pages_per_section, self._use_sitemap,
         )
+
+    @staticmethod
+    def _section(url: str) -> str:
+        """Top-level path segment of *url* — the faculty/section for breadth
+        fairness (e.g. https://uni.de/psychologie/studium/… → 'psychologie')."""
+        parts = [p for p in urlparse(url).path.split("/") if p]
+        return parts[0].lower() if parts else ""
+
+    def closed(self, reason):
+        """Record final per-uni coverage into the stats collector so the batch
+        summary can persist it (which faculties were reached, how many pages) —
+        diagnostics for a later, deeper pass without a re-crawl."""
+        try:
+            self.crawler.stats.set_value("webscraper/pages_crawled", self._pages_crawled)
+            self.crawler.stats.set_value("webscraper/sections", dict(self._section_pages))
+        except Exception:  # noqa: BLE001 — never let stats-recording fail a close
+            pass
 
     def start_requests(self):
         """Seed the crawl: the start URL, plus sitemap discovery (if enabled).
@@ -293,6 +316,10 @@ class DocumentSpider(BaseSpider):
             return
         self._pages_crawled += 1
         page_url = response.url
+        # Always track per-section (faculty) page counts — used for the breadth
+        # cap when configured, and always recorded as coverage diagnostics.
+        sec = self._section(page_url)
+        self._section_pages[sec] = self._section_pages.get(sec, 0) + 1
         logger.info(
             "[%s] Parsing page (depth=%d, #%d): %s",
             self.job_id, depth, self._pages_crawled, page_url,
@@ -361,6 +388,15 @@ class DocumentSpider(BaseSpider):
                     self.job_id, self._max_pages,
                 )
                 break
+            # Breadth fairness: once a faculty/section has had its share of page
+            # follows, stop feeding it so the remaining budget reaches the other
+            # faculties (whose handbooks would otherwise never be crawled). Only
+            # applies to same-host links; a cross-subdomain hop is handled below.
+            if (self._max_pages_per_section
+                    and urlparse(link).netloc == current_subdomain
+                    and self._section_pages.get(self._section(link), 0)
+                    >= self._max_pages_per_section):
+                continue
             crosses_subdomain = urlparse(link).netloc != current_subdomain and score > 0
             if crosses_subdomain:
                 yield from self._discover_subdomain(link)

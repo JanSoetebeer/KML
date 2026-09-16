@@ -47,6 +47,11 @@ class JobResult:
     files_found: int = 0
     files_downloaded: int = 0
     bytes_downloaded: int = 0
+    # Rich per-uni crawl diagnostics (finish_reason, pages, sections/faculties,
+    # decisions, discovery seeds …) — captured so a later pass knows which unis
+    # hit a limit (need a deeper crawl) and which faculties were reached, without
+    # having to re-crawl to diagnose. See _full_stats.
+    stats: dict = field(default_factory=dict)
 
 
 @dataclass
@@ -87,6 +92,7 @@ class BatchSummary:
                     "files_downloaded": r.files_downloaded,
                     "bytes_downloaded": r.bytes_downloaded,
                     "detail": r.detail,
+                    "stats": r.stats,
                 }
                 for r in self.results
             ],
@@ -241,9 +247,11 @@ class JobRunner:
             )
             self._store.mark_visited(validated, job_id)
             found, downloaded, size = _read_stats(crawler)
+            full = _full_stats(crawler)
             logger.info(
-                "[%s] DONE job — %s (found=%d downloaded=%d bytes=%d)",
+                "[%s] DONE job — %s (found=%d downloaded=%d bytes=%d reason=%s pages=%d)",
                 job_id, validated, found, downloaded, size,
+                full.get("finish_reason"), full.get("pages_crawled", 0),
             )
             self._summary.add(
                 JobResult(
@@ -251,6 +259,7 @@ class JobRunner:
                     files_found=found,
                     files_downloaded=downloaded,
                     bytes_downloaded=size,
+                    stats=full,
                 )
             )
         except Exception as exc:  # noqa: BLE001 — report any crawl failure
@@ -262,6 +271,7 @@ class JobRunner:
                     files_found=found,
                     files_downloaded=downloaded,
                     bytes_downloaded=size,
+                    stats=_full_stats(crawler),
                 )
             )
 
@@ -291,3 +301,30 @@ def _read_stats(crawler) -> tuple[int, int, int]:
         int(stats.get("webscraper/files_downloaded", 0)),
         int(stats.get("webscraper/bytes_downloaded", 0)),
     )
+
+
+def _full_stats(crawler) -> dict:
+    """Rich per-uni crawl diagnostics for later passes — why the crawl ended,
+    how far it got, and which faculties it reached. All best-effort: never raises.
+
+    Enables a future run to target only the unis that hit a limit (finish_reason
+    != 'finished' → needs deeper depth/budget) and to see which faculty sections
+    were covered vs missed — without a diagnostic re-crawl.
+    """
+    try:
+        s = crawler.stats.get_stats()
+    except Exception:  # noqa: BLE001
+        return {}
+    return {
+        "finish_reason": s.get("finish_reason"),
+        "pages_crawled": int(s.get("webscraper/pages_crawled", 0)),
+        "response_count": int(s.get("response_received_count", 0)),
+        "files_found": int(s.get("webscraper/files_found", 0)),
+        "files_downloaded": int(s.get("webscraper/files_downloaded", 0)),
+        "discovery_seeded": int(s.get("webscraper/discovery_seeded", 0)),
+        "classify_positive": int(s.get("webscraper/classify_positive", 0)),
+        "classify_review": int(s.get("webscraper/classify_review", 0)),
+        "classify_negative": int(s.get("webscraper/classify_negative", 0)),
+        # {faculty/section: pages followed} — coverage breadth per faculty.
+        "sections": s.get("webscraper/sections", {}),
+    }

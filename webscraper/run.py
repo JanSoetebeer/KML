@@ -238,9 +238,39 @@ def run_batch(
     # Emit a machine-readable summary on stdout so callers (Lambda handler /
     # webapp) can surface a results dashboard. The marker lets them locate this
     # single line amongst the log output.
-    print(SUMMARY_MARKER + " " + json.dumps(summary.to_dict()), flush=True)
+    summary_dict = summary.to_dict()
+    print(SUMMARY_MARKER + " " + json.dumps(summary_dict), flush=True)
+
+    # Persist the batch summary (with per-uni crawl diagnostics: finish_reason,
+    # pages, faculty sections) to S3, so a later pass can decide which unis need
+    # a deeper crawl without re-crawling to diagnose. Best-effort, never fatal.
+    _upload_summary_to_s3(settings, batch_id, summary_dict)
 
     return 2 if counts.get("error", 0) else 0
+
+
+def _upload_summary_to_s3(settings, batch_id: str, summary_dict: dict) -> None:
+    """Upload the run summary JSON to s3://<bucket>/summaries/<batch_id>.json."""
+    if not settings.getbool("S3_ENABLED", False):
+        return
+    bucket = settings.get("S3_BUCKET")
+    if not bucket:
+        return
+    try:
+        import boto3
+
+        region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+        s3 = boto3.client("s3", region_name=region) if region else boto3.client("s3")
+        key = f"summaries/{batch_id}.json"
+        s3.put_object(
+            Bucket=bucket, Key=key,
+            Body=json.dumps(summary_dict, ensure_ascii=False).encode("utf-8"),
+            ContentType="application/json",
+        )
+        logging.getLogger(__name__).info(
+            "Uploaded run summary → s3://%s/%s", bucket, key)
+    except Exception as exc:  # noqa: BLE001 — diagnostics upload must never fail a run
+        logging.getLogger(__name__).warning("Summary S3 upload failed: %s", exc)
 
 
 def run(

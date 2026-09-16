@@ -39,6 +39,16 @@ ROBOTSTXT_OBEY = True
 # SEEDS_BYPASS_ROBOTS=true; leave off to obey robots everywhere.
 SEEDS_BYPASS_ROBOTS = os.getenv("SEEDS_BYPASS_ROBOTS", "false").lower() == "true"
 
+# Breadth fairness (default 0 = off). On big multi-faculty universities a
+# best-first crawl "tunnels": it dives into the first strong section (e.g.
+# /mi/ at FernUni Hagen) and spends its whole page budget there, so other
+# faculties (/psychologie/, /ksw/ …) — whose module handbooks exist but sit
+# behind neutral navigation — are never reached. This caps how many PAGES are
+# followed per top-level path section (the faculty), forcing the crawl to spread
+# across faculties. Target-document fetches are never capped. Set to e.g. 120
+# for a thorough big-uni run; 0 keeps the old unbounded behaviour.
+CRAWL_MAX_PAGES_PER_SECTION = int(os.getenv("CRAWL_MAX_PAGES_PER_SECTION", "0"))
+
 DOWNLOAD_DELAY = float(os.getenv("DOWNLOAD_DELAY", "1"))
 RANDOMIZE_DOWNLOAD_DELAY = True
 
@@ -101,6 +111,14 @@ CRAWL_MAX_SUBDOMAIN_SITEMAPS = int(os.getenv("CRAWL_MAX_SUBDOMAIN_SITEMAPS", "15
 
 # Backstop: also stop a crawl after this many fetched pages (Scrapy built-in).
 CLOSESPIDER_PAGECOUNT = int(os.getenv("CLOSESPIDER_PAGECOUNT", "400"))
+
+# Per-university wall-clock cap (Scrapy built-in; 0 = disabled). Closes a single
+# uni's spider after this many seconds so one slow/pathological site can't stall
+# the whole batch. This is the per-crawl bound; bulk_run's runtime watchdog
+# (BULK_MAX_RUNTIME_SECONDS) is the process-level backstop that guarantees the
+# Fargate task ends even if the reactor itself hangs. Set e.g. 1800 for a deep
+# bulk run.
+CLOSESPIDER_TIMEOUT = int(os.getenv("CLOSESPIDER_TIMEOUT", "0"))
 
 # Search-discovery seeds (webscraper.discovery): path to a JSONL of document
 # URLs found out-of-band (search engine / Common Crawl), keyed by domain. When

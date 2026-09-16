@@ -45,7 +45,18 @@ class ModulhandbuchProfile(KeywordScoredProfile):
         "studienverlaufsplan": 30, "spo": 15, "stupo": 20,
         "curriculum": 30, "ordnung": 12,
         "studiengang": 20, "studiengaenge": 20, "studium": 15, "studies": 10,
-        "bachelor": 15, "master": 15, "b-sc": 10, "m-sc": 10,
+        "studienangebot": 18, "studiengangsportal": 20,
+        # Program/degree *navigation* that LEADS to a module catalogue without
+        # itself containing "modul". Big multi-faculty unis hide each programme's
+        # Modulhandbuch behind these neutral hops (e.g. FernUni Hagen:
+        # /psychologie/studium/portale/bscpsy/studium/module/…). Without a positive
+        # score the keyword-steered best-first crawl never follows them and whole
+        # faculties are missed. "bsc"/"msc" match degree-portal codes (bscpsy,
+        # mscwipsy, …) as substrings; "ba"/"ma" are intentionally omitted (too
+        # short — they would match unrelated words).
+        "portale": 18, "portal": 15, "studienportal": 20,
+        "bachelor-studiengang": 15, "master-studiengang": 15,
+        "bsc": 12, "msc": 12, "b-sc": 10, "m-sc": 10,
         "vorlesungsverzeichnis": 20, "lehrveranstaltung": 12, "lehre": 8,
         "fachbereich": 8, "fakultaet": 8, "institut": 5,
         "download": 10, "downloads": 10, "dokumente": 10, "formulare": 6,

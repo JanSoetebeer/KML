@@ -49,6 +49,26 @@ on:
         required: false
         default: "800"
         type: string
+      max_pages_per_section:
+        description: "Breadth fairness: max page follows per faculty/section (CRAWL_MAX_PAGES_PER_SECTION; 0=off). Set e.g. 60 for big multi-faculty unis so the crawl doesn't tunnel into one faculty."
+        required: false
+        default: "0"
+        type: string
+      closespider_timeout:
+        description: "Per-university wall-clock cap in seconds (CLOSESPIDER_TIMEOUT; 0=off). E.g. 1800 = 30 min/uni."
+        required: false
+        default: "0"
+        type: string
+      closespider_pagecount:
+        description: "Scrapy backstop: stop a uni after this many fetched responses (CLOSESPIDER_PAGECOUNT). Raise above max_pages for a deep run."
+        required: false
+        default: "400"
+        type: string
+      max_runtime_seconds:
+        description: "Hard task timeout (BULK_MAX_RUNTIME_SECONDS): the process force-exits after this, guaranteeing the task (and billing) stops even if a crawl hangs. Default 21600 = 6h; raise for a deep all-uni run (e.g. 43200 = 12h)."
+        required: false
+        default: "21600"
+        type: string
       subdomain_sitemaps:
         description: "Max faculty subdomains discovered per uni (CRAWL_MAX_SUBDOMAIN_SITEMAPS)"
         required: false
@@ -160,10 +180,14 @@ jobs:
                   { "name": "MAX_CONCURRENT_JOBS", "value": "${{ inputs.max_jobs }}" },
                   { "name": "CRAWL_MAX_DEPTH","value": "${{ inputs.max_depth }}" },
                   { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" },
+                  { "name": "CRAWL_MAX_PAGES_PER_SECTION","value": "${{ inputs.max_pages_per_section }}" },
+                  { "name": "CLOSESPIDER_TIMEOUT","value": "${{ inputs.closespider_timeout }}" },
+                  { "name": "CLOSESPIDER_PAGECOUNT","value": "${{ inputs.closespider_pagecount }}" },
                   { "name": "CRAWL_MAX_SUBDOMAIN_SITEMAPS","value": "${{ inputs.subdomain_sitemaps }}" },
                   { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" },
                   { "name": "BULK_SEEDS_ONLY","value": "${{ inputs.seeds_only }}" },
-                  { "name": "SEEDS_BYPASS_ROBOTS","value": "${{ inputs.seeds_bypass_robots }}" }
+                  { "name": "SEEDS_BYPASS_ROBOTS","value": "${{ inputs.seeds_bypass_robots }}" },
+                  { "name": "BULK_MAX_RUNTIME_SECONDS","value": "${{ inputs.max_runtime_seconds }}" }
                 ]
               }
             ]
