@@ -74,6 +74,11 @@ on:
         required: false
         default: false
         type: boolean
+      seeds_bypass_robots:
+        description: "Let the discovery seeds (specific public handbook PDFs) bypass robots.txt — recovers sites with a blanket Disallow:/ (e.g. Konstanz). The site link-crawl still obeys robots."
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   id-token: write
@@ -157,7 +162,8 @@ jobs:
                   { "name": "CRAWL_MAX_PAGES","value": "${{ inputs.max_pages }}" },
                   { "name": "CRAWL_MAX_SUBDOMAIN_SITEMAPS","value": "${{ inputs.subdomain_sitemaps }}" },
                   { "name": "BULK_FORCE",     "value": "${{ inputs.force }}" },
-                  { "name": "BULK_SEEDS_ONLY","value": "${{ inputs.seeds_only }}" }
+                  { "name": "BULK_SEEDS_ONLY","value": "${{ inputs.seeds_only }}" },
+                  { "name": "SEEDS_BYPASS_ROBOTS","value": "${{ inputs.seeds_bypass_robots }}" }
                 ]
               }
             ]

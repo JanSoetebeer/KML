@@ -202,6 +202,15 @@ class DocumentSpider(BaseSpider):
         # crawl frontier (priority beats page follows and sitemap seeds). Only
         # same-site URLs are honoured — discovery already scopes to the domain,
         # this is the belt-and-braces guard the rest of the engine also uses.
+        # Opt-in SEEDS_BYPASS_ROBOTS lets these specific, publicly-indexed
+        # documents through even on sites with a blanket `Disallow: /` (the site
+        # link-crawl still obeys robots — only these named seed URLs bypass it).
+        s = getattr(self, "settings", None)
+        seed_bypass_robots = s.getbool("SEEDS_BYPASS_ROBOTS", False) if s else False
+        seed_meta = {"dont_obey_robotstxt": True} if seed_bypass_robots else None
+        if seed_bypass_robots and self.extra_seeds:
+            logger.info("[%s] SEEDS_BYPASS_ROBOTS on — discovery seeds bypass robots.txt",
+                        self.job_id)
         for url in self.extra_seeds:
             if not self._same_site(url):
                 continue
@@ -212,6 +221,7 @@ class DocumentSpider(BaseSpider):
                 cb_kwargs={"source_page": "discovery"},
                 priority=_DOCUMENT_BASE_PRIORITY + 500,
                 errback=self._on_error,
+                meta=seed_meta,
             )
 
         # Seed-only: the site itself is deliberately not crawled — return before

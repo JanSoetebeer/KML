@@ -31,6 +31,14 @@ USER_AGENT = os.getenv(
 
 ROBOTSTXT_OBEY = True
 
+# Opt-in escape hatch (default OFF): bypass robots.txt ONLY for the out-of-band
+# discovery seeds — specific, publicly-published handbook PDFs a search engine
+# already indexed. The normal link-crawl still fully obeys robots.txt. This
+# recovers universities whose site-wide `Disallow: /` (e.g. uni-konstanz.de)
+# otherwise drops the exact documents we were pointed to. Enable per run with
+# SEEDS_BYPASS_ROBOTS=true; leave off to obey robots everywhere.
+SEEDS_BYPASS_ROBOTS = os.getenv("SEEDS_BYPASS_ROBOTS", "false").lower() == "true"
+
 DOWNLOAD_DELAY = float(os.getenv("DOWNLOAD_DELAY", "1"))
 RANDOMIZE_DOWNLOAD_DELAY = True
 
