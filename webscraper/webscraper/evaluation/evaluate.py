@@ -182,6 +182,8 @@ def rescore_decisions(
     """
     changed = 0
     for r in records:
+        if r.get("llm_reviewed"):
+            continue  # authoritative LLM content verdict — thresholds don't apply
         raw = r.get("module_handbook_score")
         if raw is None:
             continue  # unreadable → stays needs_review (as the live pipeline does)

@@ -151,7 +151,14 @@ def main(argv=None) -> int:
     if args.bucket:
         import boto3
 
-        s3_client = boto3.client("s3")
+        # Honour --no-verify-ssl for S3 too (local corporate TLS-proxy): fetching
+        # the documents to review would otherwise fail the cert check locally.
+        # NB: the S3 region is intentionally NOT args.region — that is the Bedrock
+        # region (which can differ from the bucket's, e.g. a Bedrock key issued in
+        # eu-north-1 while the bucket lives in eu-central-1). boto3 resolves the
+        # bucket region from AWS_DEFAULT_REGION / the default chain.
+        s3_kw = {"verify": False} if args.no_verify_ssl else {}
+        s3_client = boto3.client("s3", **s3_kw)
 
     client = _build_client(args.region, verify_ssl=not args.no_verify_ssl)
     logger.info("Bedrock client ready (region=%s, model=%s, verify_ssl=%s)",
