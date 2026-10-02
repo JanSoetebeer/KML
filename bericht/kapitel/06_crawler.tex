@@ -1,0 +1,119 @@
+\chapter{Der Crawler: Entwicklung und Recall-Arbeit}\label{ch:crawler}
+
+Der Crawler ist das Herzstück des Systems und zugleich das, was sich am häufigsten geändert hat. Dieses Kapitel folgt dem Weg von einem einfachen Tiefen-Crawl zu einer gesteuerten, seeds-gestützten Breitensuche. Es nennt zu jedem Schritt das Problem, die Maßnahme und die Wirkung, und es beschreibt ausdrücklich, was nicht funktioniert hat.
+
+\section{Ausgangspunkt: ungesteuerter Tiefen-Crawl}
+Der erste Spider folgte allen Links derselben Domain bis zu einer festen Tiefe (zunächst 2) und einer Seitengrenze (60) und lud PDF- und Word-Dateien herunter. Die Hochschulliste enthält nur Startseiten, daher wurde ein begrenzter Tiefen-Crawl nötig (\texttt{CRAWL\_MAX\_DEPTH}, \texttt{CRAWL\_MAX\_PAGES}, \texttt{allowed\_domains}). Im Juli zeigte ein Test auf der TU Dortmund das Grundproblem: Von der Startseite aus wurden 934 Dokumente gefunden, 372 heruntergeladen und \emph{nur 4} waren echte Modulhandbücher, bei rund 156 Studiengängen. Die Ursache war doppelt: Der Crawl folgte Links in beliebiger Reihenfolge und verbrauchte das kleine Seitenbudget für Nachrichten und Impressum, und Modulhandbücher liegen auf \emph{Fakultäts-Subdomains} (etwa \texttt{cs.tu-dortmund.de}) in Tiefen, die das Budget nie erreichte. Das Durchprobieren von Tiefe 1--3 und 25--200 Seiten in Lambda führte zudem ins Zeitlimit (Kapitel~\ref{ch:aws}).
+
+\section{Fokussierter Crawl (24. Juli)}
+Die erste größere Verbesserung bestand aus drei Maßnahmen:
+\begin{enumerate}
+  \item \textbf{Best-First-Frontier.} Jeder Link wird nach Schlüsselwörtern in URL und Ankertext bewertet (Umlaute gefaltet); die Bewertung wird zur Scrapy-Request-Priorität, Dokumente erhalten einen Grundbonus. Das Wortlisten-Vokabular (\texttt{modulhandbuch}, \texttt{modulbeschreibung}, \texttt{studiengang} usw. positiv; \texttt{impressum}, \texttt{news} usw. negativ) liegt im Profil.
+  \item \textbf{Sitemap-Seeding.} \texttt{start\_requests} lädt \texttt{/sitemap.xml} sowie die in der robots.txt genannten Sitemaps, behandelt Gzip und Index-Rekursion und lädt passende Dokumente direkt.
+  \item \textbf{Subdomain-Erkennung.} Springt ein Link in eine neue Subdomain derselben Basisdomain, wird die Tiefe zurückgesetzt, die Priorität erhöht und die Sitemap der Subdomain geladen (begrenzt über \texttt{CRAWL\_MAX\_SUBDOMAIN\_SITEMAPS}).
+\end{enumerate}
+Am selben Tag wurde die Engine \textbf{modularisiert}: Linkbewertung, Zieldefinition und Extraktion liegen in austauschbaren \emph{Extraktionsprofilen} (Kapitel~\ref{ch:architektur}). Außerdem wurden \textbf{skriptgenerierte PDFs} ohne \texttt{.pdf} in der URL erkannt (RWTH: \texttt{show\_document.asp?id=…}, \texttt{download.php?id=…}): Die Antwort wird anhand des Content-Types als Dokument erkannt und der Dateiname mit einem Hash versehen, damit sich Skript-URLs in S3 nicht überschreiben.
+
+\subsection{Rauchtest auf vier Hochschulen}
+Ein Test auf vier Hochschulen (769 PDFs; 202 positiv, 41 Review, 526 negativ) zeigte, dass die Wirksamkeit stark von der Seitenstruktur abhängt (\cref{tab:smoke}). Die Mechanismen funktionierten, der Recall ist \emph{strukturabhängig}: nahezu vollständig bei einfachen Seiten, teilweise bei Riesenuniversitäten und null bei JavaScript-Startseiten. Diese Erkenntnis bestimmte die weitere Arbeit.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Rauchtest auf vier Hochschulen (24.\,Juli).}\label{tab:smoke}
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+\textbf{Hochschule} & \textbf{Ergebnis} & \textbf{Beobachtung} \\
+\midrule
+FH Wedel & sehr gut & Informatik-Handbuch mit Score 0,96 gefunden \\
+TU Dortmund & teilweise & 8 Fakultäts-Subdomains erkannt, Informatik-Handbuch gefunden, aber nur etwa 28 von 156 Studiengängen (Budget) \\
+RWTH Aachen & teilweise & skriptgenerierte PDFs erkannt (Review-Band um 0,6), die Informatik-Fakultät aber nicht erreicht \\
+FH Münster & \textbf{null} & JavaScript-Startseite ohne Sitemap: Scrapy sieht keine Links \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Erster Großlauf über die Hochschulliste (12. August)}
+Der Großlauf über 411 Listeneinträge (404 Hochschulen nach Zusammenführung von Einträgen mit gleicher Domain) lief \zDauerAug{}\,h auf einem Fargate-Task mit 4\,vCPU und 16\,GB und lud 65.944 PDFs herunter (Mittel rund \zRateAug{} PDFs pro Stunde, Median 285~s je Hochschule). Die Evaluation (eigenes Auswertungspaket mit HTML-Bericht, Szenarien nach Typ, Träger, Größe und Bundesland) ergab:
+\begin{itemize}
+  \item 11.579 automatisch positive, 8.166 Review-Fälle und 46.199 negative Dokumente;
+  \item Abdeckung nur 261 von 404 Hochschulen, \textbf{145 Hochschulen ohne ein einziges Handbuch}, damit lag die Zahl der Treffer bei knapp 30\,\% des Erwartungswerts von rund \zZielwert{};
+  \item Die Lücke war konzentriert auf kleine und nicht-öffentliche Hochschulen: öffentlich 79\,\%, privat 35\,\%, kirchlich 49\,\% Abdeckung; nach Größe von 49\,\% (unter 1.000 Studierende) bis 92\,\% (15.000--30.000);
+  \item NORDAKADEMIE, bei der erwartungsgemäß keine Handbücher online liegen, lieferte 9 „positive“ Treffer; ein Hinweis auf Fehlalarme, der sich später bestätigte (Kapitel~\ref{ch:klassifikation});
+  \item Die FernUniversität Hagen, mit Abstand die größte Hochschule Deutschlands, lieferte nur 57 Positive und 145 Review-Fälle; ein Hinweis auf zu geringe Tiefe pro Hochschule (siehe Phase~2 unten).
+\end{itemize}
+
+Die Diagnose zerlegte das Problem in drei unabhängige Lücken: (A)~82 Hochschulen wurden gecrawlt, hatten aber null Handbücher, (B)~70 Hochschulen lieferten null Dokumente, und (C)~auch bei Hochschulen mit Treffern war der Recall pro Hochschule gering. Stichproben zeigten, dass die als „leer“ gemeldeten Hochschulen (Konstanz, FH Kiel) sehr wohl Handbücher an erratbaren URLs haben (\texttt{/uploads/tx\_studiengang/modulebook\_*.pdf}, \texttt{/fileadmin/…/modulhandbuch\_*.pdf}): Nicht die Abwesenheit, sondern \emph{Auffindbarkeit} war der Engpass.
+
+\section{Schnelle Gewinne ohne Zusatzbudget}
+Zwei Anpassungen kosteten nichts:
+\begin{itemize}
+  \item \textbf{Schwelle:} Das ausgelieferte Modell hatte eine obere Schwelle von 0,65. Ein Neubewerten der \emph{bereits heruntergeladenen} 65.944 Dokumente bei 0,50 ergab +2.333 Positive (11.579 $\to$ 13.912) und +10 Hochschulen (261 $\to$ 271), bei rund 88\,\% Precision auf dem Hold-out. Ein „What-if“-Schalter der Evaluation (\texttt{--upper}) rechnet Entscheidungen aus gespeicherten Scores neu, ohne Neu-Crawl. (Dass diese Absenkung später zur Positiv-Flut beitrug, ist Teil von Kapitel~\ref{ch:klassifikation}.)
+  \item \textbf{Vokabular:} Dateinamenmuster, die vorher ohne Gewicht blieben (\texttt{modulebook}, \texttt{mhb}, \texttt{handbuch}, \texttt{spo}, \texttt{studienverlaufsplan}), wurden ins Profil aufgenommen, sodass Best-First sie früher erreicht.
+\end{itemize}
+
+\section{Discovery: Seeds aus Suchindizes}\label{sec:crawler-discovery}
+Dominanter Hebel war die \emph{Discovery}: Pro Hochschule wird vorab gesucht, wo Modulhandbücher liegen, und diese URLs werden als priorisierte Ziele in den Crawl eingespeist (\texttt{DISCOVERY\_SEEDS\_PATH}, in der Cloud über S3). \Cref{tab:discovery} zeigt alle erprobten Anbieter, auch die verworfenen.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Erprobte Discovery-Quellen.}\label{tab:discovery}
+\begin{tabularx}{\linewidth}{@{}l l X@{}}
+\toprule
+\textbf{Quelle} & \textbf{Status} & \textbf{Befund} \\
+\midrule
+Common Crawl (CDX) & \textbf{genutzt} & Kostenlos, ohne Schlüssel; je Domain PDFs mit „modul/handbuch“-Mustern. Von 18 getesteten Problemdomänen wurden für 11 Handbücher gefunden; stark bei Fakultäts- und Modul-Datenbank-Subdomains. Blind für tief verlinkte, unverlinkte Dateien. Mehrere Monatsindizes werden vereinigt, Anfragen mit Backoff und Pausen (CC drosselt Bursts und sperrte die Test-IP zeitweise). \\
+Serper (Google-SERP) & \textbf{genutzt} & Abfrage \texttt{site:<basis> <begriff>}; findet tiefe Dateien wie das Konstanzer \texttt{modulebook}. Die kostenlose Stufe verlangt Anpassungen (kein \texttt{filetype:}, höchstens 10 Treffer je Anfrage); eine bezahlte Stufe war nicht möglich. \\
+Firecrawl & vorbereitet, kaum getestet & Rendert JavaScript, liefert Link-Karten und ersetzt eine Seite durch ihr gerendertes HTML (Middleware). Für IU hat die Karte \emph{keine} PDF-Handbücher gefunden, das Portal ist ein reiner JavaScript-Katalog. Die Pipeline für Katalog-Seiten (Inhaltsklassifikation statt PDF) existiert, wurde aber nicht im Großlauf eingesetzt. \\
+\textcolor{orange!80!black}{Google Custom Search} & \textbf{verworfen} & Google hat „gesamtes Web durchsuchen“ aus der Programmable Search Engine entfernt; nur noch 50 gelistete Domains, damit für 400 Hochschulen nutzlos. \\
+\textcolor{orange!80!black}{DuckDuckGo} & \textbf{verworfen} & Aus der Cloud-Umgebung CAPTCHA-gesperrt. \\
+\textcolor{orange!80!black}{Sitemaps allein} & unzureichend & Tiefe Dateien (z.\,B.\ Konstanz) stehen in keiner Sitemap; die Universität hat keine \texttt{sitemap.xml}. \\
+Brave Search API & nicht gebaut & Unabhängiger Index, wäre die einzige realistische Quelle für die tiefsten Dateien, benötigt aber Anmeldung und eventuell Zahlungsmittel. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Wirkung.} Ein Test auf drei Hochschulen, die im ersten Lauf null Treffer hatten (htwsaar, Konstanz, FH Kiel), ergab mit Serper und Common Crawl nach einem kurzen Crawl 42 klassifizierte Dokumente, davon 7 automatisch positive; die LLM-Zweitstufe bestätigte weitere 6 englische Handbücher, die das TF-IDF-Modell unsicher beurteilt hatte. Zusammen 13 Handbücher bei vorher null.
+
+\section{Seeds-only-Modus: Lücken ohne Duplikate schließen}
+Der Visited-Store in DynamoDB dedupliziert auf Ebene der \emph{Hochschule} (Start-URL), nicht des Dokuments: Ein erneuter Lauf mit Discovery übersprang jede bereits gecrawlte Hochschule, und die Discovery lief nie. Ein vollständiges Leeren der Tabelle hätte alle Hochschulen neu gecrawlt (und zu physischen Duplikaten in S3 geführt, da der S3-Schlüssel die Job-ID enthält). Die Lösung war ein \textbf{Seeds-only-Modus}: Der Spider holt ausschließlich die Seeds, überspringt den Visited-Store, und Hochschulen ohne Seeds werden sofort übergangen. Der erste Lauf (3.\,September) holte 431 PDFs von 134 Hosts (226 positiv, 179 negativ, 26 Review) und hob die Abdeckung \emph{in wenigen Minuten} von 271 auf 314 Hochschulen (+43), die Positive von 13.912 auf 14.133. Das bewies den Ansatz.
+
+\subsection{robots.txt und Seeds}\label{sec:crawler-robots}
+Bei elf Hochschulen blieb der Seeds-Lauf zunächst bei null heruntergeladenen Dateien, obwohl Seeds vorlagen. Die Vermutung war JavaScript oder robots.txt; tatsächlich lag es an einer veralteten Seed-Datei im Lauf. Das echte robots-Problem trat bei der Universität Konstanz auf (\texttt{Disallow: /}). Die Lösung ist \texttt{SEEDS\_BYPASS\_ROBOTS} (standardmäßig \emph{aus}): Es setzt \texttt{dont\_obey\_robotstxt} \emph{nur} auf Requests für Discovery-Seeds, also auf einzelne, vom Suchindex als öffentlich ausgewiesene Handbuch-URLs, während der Link-Crawl der Seite robots.txt weiter respektiert. Im Test lieferte Konstanz damit 13 von 18 Dateien (6\,MB). Diese Ausnahme ist eine bewusste Abwägung, die im Ausblick und in der Diskussion (Kapitel~\ref{ch:diskussion}) aufgegriffen wird.
+
+\section{Phase 2: Vollständigkeit je Hochschule}
+Auch bei Hochschulen mit Treffern blieb der Recall niedrig. Beispiel FernUniversität Hagen: nur 70 Handbücher, erwartet waren hunderte. Die Ursache: Der gesteuerte Crawl \emph{tunnelte} in die erste starke Fakultät (\texttt{/mi/}) und erreichte nie Fakultäten, deren Modulkataloge hinter neutraler Navigation liegen (\texttt{/psychologie/studium/portale/<abschluss>/…}, kein „modul“ im Pfad). Gegenmaßnahmen:
+\begin{itemize}
+  \item \textbf{Breadth-Fairness:} \texttt{CRAWL\_MAX\_PAGES\_PER\_SECTION} begrenzt die Seitenfolgen pro erstem Pfadsegment (Fakultät) und erzwingt Streuung; Dokument-Downloads werden nie gekappt.
+  \item \textbf{Navigations-Tokens} im Profil (\texttt{portal}, \texttt{bsc}, \texttt{msc}, \texttt{studienangebot} usw.), damit schlüsselwortlose Programm-Zweige verfolgt werden.
+  \item \textbf{Deep-Run-Konfiguration:} Tiefe 5, 2.500 Seiten, 60 Seiten pro Sektion, bis 3.000 Seiten und 1.800\,s je Hochschule, Gesamtlaufzeit bis 12\,h, \texttt{force}.
+  \item \textbf{Terminierungsgarantie} und Diagnose-Statistiken je Hochschule (Abbruchgrund, Seitenzahl, Sektionsverteilung).
+\end{itemize}
+Der lokale Test an Hagen zeigte, dass der Crawl jetzt Wirtschaft, Psychologie (0 $\to$ 4 Positive) und Kultur- und Sozialwissenschaften erreichte statt nur einer Fakultät.
+
+\subsection{Deep Run (16./17. September)}
+Der Deep Run lief \zDauerDeep{}\,h und lud 132.193 PDFs herunter (37.993 automatisch positiv für sich genommen). Hagen stieg von 70 auf \textbf{870} Positive (Faktor 12), verteilt über sieben Fakultäten. Die kumulierte Vereinigung aller Läufe (Aug-Lauf, Seeds-Läufe, Deep Run) ergab \zDocsTotal{} Dokumente, 43.270 TF-IDF-Positive bei Schwelle 0,5 und eine Abdeckung von 321 Hochschulen. Das erreichte \emph{nominell} das 40.000er-Ziel, war aber durch die Precision-Probleme noch nicht belastbar (Kapitel~\ref{ch:klassifikation}).
+
+\abb[0.95]{htbp}{B03_verlauf_abdeckung}{Abdeckung (links) und gelistete Positive (rechts) im Projektverlauf. Die grauen Balken sind TF-IDF-Positive ohne LLM-Prüfung; erst die Endstände (grün, blau) sind qualitätsgesichert.}
+
+\section{Höflichkeit und Grenzen}
+Der Crawler respektiert robots.txt, drosselt (Basiswartezeit 1\,s plus AutoThrottle) und tritt mit identifizierbarem User-Agent auf. Weitere harte Grenzen (Dateigröße 50\,MB, Timeout 60\,s je Anfrage) sind in Anhang~\ref{app:konfig} aufgeführt. Weiterhin außerhalb der Reichweite sind Handbücher hinter Login, nur zur Laufzeit erzeugte Dokumente ohne Datei und Handbücher auf einer \emph{anderen} registrierbaren Domain als der Startseite (\texttt{\_same\_site} vergleicht die letzten zwei DNS-Labels).
+
+\section{Zusammenfassung der Crawl-Entwicklung}
+\Cref{tab:crawl-weg} bündelt den Weg.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Crawl-Strategien im Zeitverlauf mit Problem, Maßnahme und Wirkung.}\label{tab:crawl-weg}
+\begin{tabularx}{\linewidth}{@{}p{2.2cm} p{3.6cm} X@{}}
+\toprule
+\textbf{Zeitpunkt} & \textbf{Problem} & \textbf{Maßnahme und Wirkung} \\
+\midrule
+Juli & Budget für Unwichtiges verbraucht, TU Dortmund 4 Treffer in 934 Dokumenten & Best-First, Sitemap, Subdomains; Handbuch-Funde deutlich höher \\
+24.07. & Skript-URLs, JS-Startseiten & Content-Type-Erkennung (RWTH gelöst); JS-Startseiten (FH Münster) \emph{ungelöst} \\
+12.08. & 145 Hochschulen ohne Treffer & Auswertungsmodul; Schwelle 0,5: +2.333 Positive, +10 Hochschulen \\
+27.08. & Handbücher nicht auffindbar & Discovery (Common Crawl, Serper), OCR, LLM-Zweitstufe \\
+03.09. & Visited-Store blockiert Wiederholung & Seeds-only: +43 Hochschulen in Minuten \\
+16.09. & robots-Sperre (Konstanz), Tunneln (Hagen) & Seeds-Robots-Bypass; Breadth-Fairness; Deep Run: Hagen 70 $\to$ 870 \\
+\bottomrule
+\end{tabularx}
+\end{table}

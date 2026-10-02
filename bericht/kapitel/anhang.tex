@@ -1,0 +1,77 @@
+\chapter{Konfiguration der Läufe}\label{app:konfig}
+
+\begin{table}[htbp]
+\centering\small
+\caption{Konfigurationsgrenzen des Crawlers: Lambda/MVP gegenüber Fargate Deep Run.}
+\begin{tabularx}{\linewidth}{@{}l l l X@{}}
+\toprule
+\textbf{Parameter} & \textbf{MVP/Lambda} & \textbf{Deep Run} & \textbf{Bedeutung} \\
+\midrule
+\texttt{CRAWL\_MAX\_DEPTH} & 2 & 5 & Link-Tiefe je Hochschule \\
+\texttt{CRAWL\_MAX\_PAGES} & 60 & 2.500 & Seitenbudget (weich) \\
+\texttt{CRAWL\_MAX\_PAGES\_PER\_SECTION} & -- & 60 & Seitenkappe je Fakultäts-Sektion \\
+\texttt{CLOSESPIDER\_PAGECOUNT} & 400 & 3.000 & harte Seitengrenze \\
+\texttt{CLOSESPIDER\_TIMEOUT} & -- & 1.800\,s & Zeitgrenze je Hochschule \\
+\texttt{BULK\_MAX\_RUNTIME\_SECONDS} & -- & 43.200 & Wachhund (Gesamtlauf) \\
+\texttt{CRAWL\_MAX\_SUBDOMAIN\_SITEMAPS} & 15 & 30 & Sitemaps von Subdomains \\
+\texttt{DOWNLOAD\_MAXSIZE} & 50\,MB & 50\,MB & je Datei \\
+\texttt{DOWNLOAD\_TIMEOUT} & 60\,s & 60\,s & je Anfrage \\
+\texttt{DOWNLOAD\_DELAY} & 1\,s + AutoThrottle & dto. & je Domain \\
+\texttt{CONCURRENT\_REQUESTS} & 4 (2 je Domain) & 16 & je Job \\
+Rechenressource & Lambda 1.536\,MB & Fargate 4\,vCPU/16\,GB & \\
+\texttt{CLASSIFIER\_UPPER\_THRESHOLD} & 0,65 & 0,50 & obere Modellschwelle \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\chapter{Metriken im Detail}\label{app:metriken}
+\begin{table}[htbp]
+\centering\small
+\caption{Metriken der Modellvarianten (gruppierte Kreuzvalidierung), jeweils am Recall-Ziel von 95\,\%.}
+\begin{tabular}{@{}l r r r r r r@{}}
+\toprule
+\textbf{Variante} & \textbf{PR-AUC} & \textbf{ROC-AUC} & \textbf{Recall} & \textbf{Prec.} & \textbf{F1} & \textbf{F2} \\
+\midrule
+MVP \emph{content} (0,387) & 0,957 & 0,941 & 0,955 & 0,871 & 0,911 & 0,937 \\
+MVP \emph{content + Dateiname} & 0,960 & 0,926 & 0,955 & 0,848 & 0,898 & 0,932 \\
+Sept.\ \emph{content} (0,627) & 0,988 & 0,973 & 0,950 & 0,965 & 0,958 & 0,953 \\
+Sept.\ \emph{content + Metadaten} (0,509) & 0,976 & 0,959 & 0,950 & 0,958 & 0,954 & 0,952 \\
+\bottomrule
+\end{tabular}
+\end{table}
+\paragraph{Konfusionsmatrizen.} MVP \emph{content}: 128 richtig positiv, 6 falsch negativ, 49 richtig negativ, 19 falsch positiv (202 Dokumente, 21 Hochschulen); bei Schwelle 0,5: Precision 0,907, Recall 0,873, 17 statt 6 übersehene Handbücher. September \emph{content}: 1.873 / 98 / 656 / 68 (2.695 Dokumente, 269 Hochschulen); bei Schwelle 0,5: Precision 0,952, Recall 0,985 (1.942 TP, 29 FN, 625 TN, 99 FP).
+
+\chapter{Reproduzierbarkeit}\label{app:repro}
+Alle Zahlen und Grafiken lassen sich aus den Läufen neu erzeugen:
+\begin{lstlisting}
+# 1. Endliste und Kennzahlen (aus Repo-Root)
+python auswertung/build_final.py
+.venv\Scripts\python auswertung\make_charts.py       # 23 Grafiken + kennzahlen.json
+
+# 2. Berichtsgrafiken und Zahlenmakros
+.venv\Scripts\python bericht\make_report_charts.py   # B01-B09, zahlen.tex, Wochentabellen
+
+# 3. PDF bauen
+cd bericht ; latexmk -pdf main.tex
+\end{lstlisting}
+Die gesamte Strecke steht in \texttt{bericht/build.ps1}. Handgepflegte Eingaben: \texttt{bericht/daten/stunden.csv} (Stunden und Tätigkeiten), \texttt{bericht/daten/kosten.csv} (Kosten), \texttt{bericht/daten/s3\_objekte.csv} (Auflistung des Buckets, erzeugt mit \texttt{aws s3 ls --recursive}). Evaluationsberichte (\texttt{eval\_*.html}) entstehen mit \texttt{python -m webscraper.evaluation} aus \texttt{webscraper/}.
+
+\chapter{Weitere Auswertungsgrafiken}\label{app:grafiken}
+Die folgenden Grafiken der Abschlussauswertung werden im Text nicht direkt referenziert.
+\abb[0.85]{htbp}{04_score_histogramm}{Score-Verteilung nach Endstatus (logarithmische Achse).}
+\abb[0.85]{htbp}{06_llm_konfidenz}{Konfidenzverteilung der LLM-Urteile.}
+\abb[0.85]{htbp}{15_hochschul_status}{Status der Hochschulen vor und nach der Bereinigung.}
+
+\chapter{Glossar}
+\begin{description}[style=nextline,leftmargin=1.2cm]
+  \item[Bulk-Crawl] Läufe über viele Hochschulen auf Fargate ohne Zeitlimit.
+  \item[Discovery] Vorabsuche nach Handbuch-URLs über Suchindizes (Common Crawl, Serper).
+  \item[Seeds] Von der Discovery gefundene URLs, die der Crawler priorisiert holt.
+  \item[Seeds-only-Modus] Lauf, der ausschließlich Seeds holt und den Visited-Store umgeht.
+  \item[Visited-Store] Persistenter Speicher (DynamoDB) für bereits gecrawlte Hochschulen.
+  \item[Review-Band] Score-Bereich zwischen den Schwellen; Dokumente mit unsicherer Entscheidung.
+  \item[Pilotstichprobe] Zufällige Stichprobe von 400 Positiven mit Score $\ge$ 0,9 zur Schätzung der Precision der ungeprüften Gruppe.
+  \item[Strenge / erweiterte Liste] Strenge Liste: nur LLM-bestätigt. Erweiterte Liste: zusätzlich TF-IDF $\ge$ 0,9 ohne LLM-Prüfung.
+  \item[SCP] Service Control Policy: organisationsweite AWS-Sperre einzelner Aktionen.
+  \item[KIWIT] Forschungsgruppe zu Funktionen und Folgen Künstlicher Intelligenz in der Wissenschafts- und Hochschulorganisation.
+\end{description}

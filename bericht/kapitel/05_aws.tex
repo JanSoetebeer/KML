@@ -1,0 +1,138 @@
+\chapter{Die AWS-Umgebung: Aufbau, Entwicklung und Rückschläge}\label{ch:aws}
+
+Die AWS-Umgebung war nicht nur Hosting, sondern ein zentraler Teil der Projektarbeit. Dieses Kapitel beschreibt, wie sich Rechenumgebung und Betrieb entwickelt haben (von Lambda zu Fargate, von Terraform zu einem Bootstrap-Skript), welche Beschränkungen des Hochschul-Accounts den Weg bestimmt haben und welche Rückschläge aufgetreten sind.
+
+\section{Rahmenbedingungen: eine Sandbox auf Zeit}
+Alle Ressourcen liefen in einer AWS-Sandbox der FH Wedel (Region \texttt{eu-central-1}, Zugang per SSO-Rolle). Drei Eigenschaften dieser Umgebung haben das Projekt wesentlich geprägt:
+\begin{itemize}
+  \item \textbf{Befristete Lease:} Läuft die Sandbox ab, wird \emph{alles} gelöscht. Die Konto-ID ändert sich (im Projekt von \texttt{660941536751} zu \texttt{081757578883}).
+  \item \textbf{Budgetdeckel:} Für den Sandbox-Pool galt ein Limit von 50~USD; bei Überschreitung wird der Pool eingefroren.
+  \item \textbf{Service Control Policies (SCP):} Einzelne Dienste und Aktionen sind organisationsweit gesperrt (Abschnitt~\ref{sec:aws-restriktionen}).
+\end{itemize}
+
+\section{Von Lambda zu Fargate (und warum nicht EC2 oder ECS)}\label{sec:aws-lambda-fargate}
+
+\subsection{Ausgangsentscheidung}
+Die ursprüngliche Begründung für Lambda war schlüssig: Scrape-Jobs sind selten, stoßweise und perfekt parallel, Lambda skaliert auf null, ein Dauerbetrieb über ECS oder EC2 würde „Abschalten bei Nichtnutzung“ erst nachbauen müssen. Im MVP-Vortrag wurde ECS/Fargate ausdrücklich als Lösung für ein Problem bezeichnet, das man nicht habe. Das stimmte für den Ausgangszustand (Jobs auf zehn Minuten gedeckelt, einige Dutzend URLs), nicht mehr für das Zielbild „alle Hochschulen, tief gecrawlt“.
+
+\subsection{Wo Lambda scheiterte}
+Beim Versuch, Tiefe und Seitenzahl zu erhöhen (Tiefe 1--3, 25--200 Seiten wurden durchprobiert), liefen die Jobs ins 15-Minuten-Limit. Am 22.\,Juli entstand deshalb eine Skalierungs-Roadmap. Sie identifizierte drei harte Grenzen von Lambda: (1)~das Zeitlimit von 15 Minuten, (2)~die Pufferung jeder Datei im Arbeitsspeicher (\texttt{upload\_fileobj(BytesIO(\ldots))}) und (3)~die gemeinsame Zeit- und Speicherbudgetierung aller URLs eines Aufrufs. Visited-Store (DynamoDB) und Ausgabe (S3) skalierten dagegen problemlos; das Nadelöhr war ausschließlich die Crawl-Rechenzeit.
+
+\subsection{Optionen}
+\Cref{tab:compute-optionen} fasst die erwogenen Rechenpfade zusammen.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Erwogene Rechenpfade für den Crawl und ihr Schicksal.}\label{tab:compute-optionen}
+\begin{tabularx}{\linewidth}{@{}p{3.1cm} X p{3.0cm}@{}}
+\toprule
+\textbf{Option} & \textbf{Bewertung} & \textbf{Ergebnis} \\
+\midrule
+Lambda (nur) & Billig, schnell, aber 15\,min und RAM-Pufferung; ungeeignet für tiefe Crawls & behalten für $\le$ 10 URLs (interaktiv) \\
+SQS-Fan-out auf Lambda & Eine Hochschule je Invocation, hunderte parallel; löst „viele Hochschulen“, nicht „eine sehr tiefe Hochschule“ & geplant (Roadmap, Phase~1b), \emph{nicht gebaut} \\
+EC2-Stopgap & Großer Lauf auf der vorhandenen Webapp-Instanz; keine neue Infrastruktur, aber t3.small und belegt Dauerbetrieb & nur als Übergangslösung beschrieben \\
+ECS auf EC2 & Cluster-Verwaltung nötig, Leerlaufkosten & nicht gewählt \\
+\textbf{ECS Fargate} & Kein Zeitlimit, bis 4\,vCPU/16\,GB, gleiches Image, Abrechnung nur während der Laufzeit & \textbf{gewählt} (24.\,Juli) \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\subsection{Umsetzung des Fargate-Pfads}
+Am 24.\,Juli entstand der Bulk-Pfad innerhalb eines Tages: Einstiegspunkt \texttt{bulk\_run.py} (umweltvariablengesteuert), Task-Definition und IAM-Rollen als Vorlagen mit Platzhaltern, GitHub-Workflow \texttt{bulk-crawl.yml} (\texttt{workflow\_dispatch}) und ein URL-Routing in der Webapp. Die Defaults wurden schrittweise erhöht (2 vCPU/8\,GB~$\to$ 4\,vCPU/16\,GB; 300~$\to$ 800 Seiten; 15~$\to$ 30 Subdomain-Sitemaps). Hinzu kamen später ein Seeds-Modus und ein Wachhund (Abschnitt~\ref{sec:aws-kosten}). Eine Stolperfalle: Die Webapp scheiterte zunächst mit „TaskDefinition not found“, weil nur der Workflow die Task-Definition selbst registrierte; das Bootstrap-Skript registriert sie nun immer.
+
+\subsection{Gerechnet versus gemessen}
+\Cref{tab:rechnung-realitaet} stellt die Annahmen des MVP-Vortrags den tatsächlichen Läufen gegenüber. Die Lambda-Rechnung (10 Minuten für alle Hochschulen) beschrieb einen \emph{flachen} Crawl mit Tiefe 2 und 60 Seiten; das Ziel „möglichst vollständig“ erfordert dagegen Stunden. Die Kosten blieben trotzdem klein, weil Fargate nur während des Laufs abgerechnet wird.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Rechnung im MVP-Vortrag gegenüber den realen Großläufen.}\label{tab:rechnung-realitaet}
+\begin{tabularx}{\linewidth}{@{}X l l l@{}}
+\toprule
+ & \textbf{MVP-Rechnung (Juli)} & \textbf{Aug-Lauf} & \textbf{Deep Run} \\
+\midrule
+Laufzeit gesamt & $\sim$ 10\,min (gerechnet) & \zDauerAug{}\,h (gemessen) & \zDauerDeep{}\,h (gemessen) \\
+Hochschulen & 424 & 411 & alle Hochschulen, Breitensuche \\
+Seiten je Hochschule & 60 & 800 & 2.500 \\
+Rechenkosten (Fargate, 4\,vCPU/16\,GB) & $\sim$ 1,30\,\$ (Lambda) & $\sim$ 1,5\,\$ & $\sim$ 3\,\$ \\
+Heruntergeladene PDFs & -- & 65.944 & 132.193 \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Infrastruktur als Code: Terraform, CLI, Bootstrap}\label{sec:aws-iac}
+\paragraph{Terraform (11.\,Juli).} Zunächst wurde ein Terraform-Stack angelegt (EC2, Elastic IP, Security Group, IAM, S3, DynamoDB, ECR, Lambda). In der Praxis scheiterte der Weg an der Umgebung: Terraform und Docker waren in der Entwicklungsumgebung nicht ohne Weiteres nutzbar, der Terraform-Zustand und die handangelegten Ressourcen liefen auseinander, und die Wirkung des Stacks war schwer nachzuvollziehen. Der Stack wurde am 24.\,Juli als \emph{deprecated} markiert; CI/CD und alle späteren Ressourcen (Fargate, IAM) liefen über AWS-CLI und eingecheckte JSON-Vorlagen mit Platzhaltern (\texttt{ACCOUNT\_ID}, \texttt{REGION}).
+
+\paragraph{Bootstrap-Skript (12.\,August).} Die Sandbox-Löschung (Abschnitt~\ref{sec:aws-verluste}) machte die Reproduzierbarkeit zum Hauptthema. Das Skript \texttt{webscraper/deploy/aws\_bootstrap.ps1} baut die gesamte Umgebung idempotent aus einer leeren Konto-ID auf: S3, DynamoDB, ECR, Lambda-Rolle, Image-Build und -Push, Lambda-Funktion, EC2 (IAM, Security Group, Key Pair, Instanz, Elastic IP; die Instanz konfiguriert sich über User-Data), GitHub-OIDC-Rolle, Fargate (Cluster, Rollen, Egress-Security-Group, Task-Definition). Am Ende gibt es die beiden GitHub-Variablen aus, die gesetzt werden müssen. Einige Lektionen sind im Skript fest verankert:
+\begin{itemize}
+  \item Die Richtlinien-Vorlagen müssen \emph{reine} Platzhalter enthalten. Zwei Vorlagen enthielten noch die alte Konto-ID (ein Leak im öffentlichen Repository, der zwar keinen Zugriff gewährt, aber behoben wurde).
+  \item Ersetzungen laufen case-sensitiv (\texttt{-creplace}), sonst wird der kleingeschriebene Schlüssel \texttt{awslogs-region} der Task-Definition beschädigt.
+  \item Das Skript muss reines ASCII sein, weil Windows PowerShell~5.1 Dateien ohne BOM als CP1252 liest und ein Gedankenstrich die Tokenisierung zerstört.
+  \item Neue IAM-Rollen sind nicht sofort verwendbar; die Lambda-Erstellung wiederholt bis zu sechsmal im Abstand von zehn Sekunden.
+\end{itemize}
+
+\section{CI/CD mit GitHub Actions}
+Drei Workflows liegen im Repository: \texttt{deploy-lambda.yml} (Image bauen, nach ECR pushen, Lambda aktualisieren, Pfadfilter auf \texttt{webscraper/} und \texttt{mlclassifier/}), \texttt{deploy-webapp.yml} (Instanz per Tag finden, per SSM-Run-Command \texttt{remote\_update.sh} ausführen: \texttt{git reset --hard}, \texttt{docker compose up -d --build}) und \texttt{bulk-crawl.yml} (Fargate-Task starten). Die Authentifizierung läuft per OIDC (kein statischer Schlüssel im Repository), die Anbindung per SSM (kein offener SSH-Port).
+
+Beim ersten Einsatz am 22.\,Juli traten mehrere Fehler in kurzer Folge auf, jeweils mit einem eigenen Commit („fixed deploy“, „set home variable for git in ssm deploy“): Das Skript fand das App-Verzeichnis auf der Instanz nicht (Auto-Erkennung für drei mögliche Pfade nötig), und Git verlangte unter SSM eine gesetzte \texttt{HOME}-Variable. Für den interaktiven Zugang scheiterte \texttt{aws ssm start-session} zunächst, weil das Session-Manager-Plugin lokal fehlte.
+
+\section{Betrieb der Webapp}
+Die Webapp läuft als Docker-Compose-Stack (Webapp und Caddy) auf einer t3.small mit Elastic IP; die Datenbank liegt auf einem benannten Volume und überlebt Deployments. Daraus folgt, dass das Admin-Passwort das bei der Erstanlage gesetzte bleibt; ein nicht-destruktives Zurücksetzen per SQL-Update im Container wurde dokumentiert. Zwei Betriebsvorfälle sind erwähnenswert: Am 2.\,September war die Instanz per SSM nicht erreichbar („TargetNotConnected“, nach Ablauf der Sitzungsdaten), ein Reboot behob das. Außerdem erreichten neu eingeführte Umgebungsvariablen (Discovery, Rendering) den Container zunächst nicht, weil sie in der \texttt{docker-compose.yml} nicht durchgereicht wurden.
+
+\section{Zugriffsbeschränkungen und ihre Folgen}\label{sec:aws-restriktionen}
+\begin{itemize}
+  \item \textbf{Bedrock-Mantle gesperrt.} Eine SCP verbietet \texttt{bedrock-mantle} (403), erlaubt aber das native \texttt{bedrock:InvokeModel}. Die LLM-Anbindung wurde daher auf den nativen Client umgestellt, mit dem EU-Inference-Profil \texttt{eu.anthropic.claude-haiku-4-5-20251001-v1:0}.
+  \item \textbf{Keine langlebigen Schlüssel.} Der Account erlaubt nur kurzlebige Bedrock-API-Schlüssel (rund 12\,Stunden), die SSO-Sitzung verfällt teils alle 30 Minuten. Die LLM- und OCR-Läufe mussten deshalb in kleine, wiederaufnehmbare Blöcke („Chunks“) zerlegt werden; ein Skript (\texttt{next\_chunk.py}) schneidet nur den noch offenen Rest und überspringt bereits geprüfte URLs.
+  \item \textbf{Kostensicht gesperrt.} Cost Explorer (\texttt{ce:GetCostAndUsage}) ist per SCP verboten; Kosten sind deshalb nur abgeschätzt (Abschnitt~\ref{sec:aws-kosten}).
+  \item \textbf{TLS-Interception.} Im Firmennetz ersetzt ein Proxy Zertifikate; AWS-Aufrufe aus Python scheiterten mit \texttt{CERTIFICATE\_VERIFY\_FAILED}. Lokale Läufe nutzen \texttt{--no-verify-ssl}, die EC2-Instanz und Fargate dürfen die Prüfung nicht abschalten.
+  \item \textbf{Bedrock-Kontingente.} Neue Konten melden zunächst 403 („account currently being verified“, nach unter zwei Stunden behoben). Am 30.\,September führte das Tageskontingent (\texttt{429 Too many tokens per day}) zum Abbruch der LLM-Läufe, die am Folgetag fortgesetzt wurden.
+\end{itemize}
+
+\section{Rückschläge und Verluste}\label{sec:aws-verluste}
+\Cref{tab:vorfaelle} listet die schwerwiegenden Vorfälle. Die ersten beiden haben das Projekt am stärksten beeinflusst.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Betriebsvorfälle und Gegenmaßnahmen.}\label{tab:vorfaelle}
+\begin{tabularx}{\linewidth}{@{}p{2.0cm} p{3.6cm} X@{}}
+\toprule
+\textbf{Datum} & \textbf{Ereignis} & \textbf{Folge und Gegenmaßnahme} \\
+\midrule
+12.08. & \textbf{Sandbox-Lease abgelaufen}, alle Ressourcen gelöscht, neuer Pool (Konto-ID geändert) & S3 (Manifeste, Feedback-Verdikte, Läufe), DynamoDB, Lambda, ECR, EC2 samt Webapp-Datenbank weg. Erhalten blieben Git-Repository, lokale Trainingsdaten und das Modell. Neuaufbau über das Bootstrap-Skript; der Großlauf über die Hochschulliste wurde noch am selben Tag in der neuen Umgebung wiederholt. \\
+{[}früher{]} & Weiterer Lease-Verlust bzw.\ Kontowechsel \TODO{Datum und Umfang des ersten Verlusts ergänzen} & Hartkodierte Konto-IDs in Richtlinien; Vorlagen auf Platzhalter umgestellt. \\
+bis 16.09. & \textbf{Budgetsperre} (50~USD) des Sandbox-Pools & Analyse: kein hängender Task, nur Dauerressource EC2 (t3.small) plus Läufe, Speicher und Bedrock; keine verwaisten EBS-Volumes, IPs oder NAT-Gateways. Gegenmaßnahme: dreistufige Terminierungsgarantie (siehe unten). \\
+22.07. & CI/CD scheitert beim ersten Deployment (SSM, \texttt{HOME}, App-Pfad) & vier Korrektur-Commits innerhalb von rund 20 Minuten. \\
+03.09. & DynamoDB-Visited-Store überspringt bereits gecrawlte Hochschulen & Discovery-Wiederholung fand nichts Neues; Seeds-only-Modus umgeht den Store gezielt. \\
+17.09. & Zusammenfassung des Deep Runs (\texttt{summaries/}) nicht in S3 & Task-Rolle ohne Schreibrecht auf das Präfix; Per-Hochschul-Diagnose des Laufs ging verloren (aus den Manifesten rekonstruierbar). \\
+16.09. & Evaluation überschreibt LLM-Urteile (Fehler im Code) & Alle bisherigen LLM-Ergebnisse wurden stillschweigend ignoriert; Korrektur in \texttt{rescore\_decisions}; ehrliche Abdeckung sank von 314 auf 303. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\paragraph{Der Sandbox-Verlust im Detail.} Am Vormittag des 12.\,August war die Lease abgelaufen, während die Evaluation des ersten Großlaufs über die 411 Hochschulen vorbereitet wurde. Verloren gingen nicht nur Rechenressourcen, sondern auch \emph{Daten}: der S3-Bucket mit allen Manifesten und den von Menschen vergebenen Verdikten der Feedback-Schleife sowie die Webapp-Datenbank. Dass Training und Code lokal beziehungsweise in Git lagen, begrenzte den Schaden. Die Konsequenz war doppelt: technisch die Idempotenz des Bootstrap-Skripts, organisatorisch die Regel, dass \emph{nichts Wertvolles nur in der Sandbox} liegt. Alle späteren Manifeste und Zwischenergebnisse (\texttt{*.jsonl}) liegen deshalb zusätzlich lokal. Der Großlauf, auf den sich die Evaluation bezog, lag in der verlorenen Umgebung und wurde noch am 12.\,August (13:17--19:35~UTC) in der neuen Sandbox wiederholt; die gesamte weitere Auswertung beruht auf diesem zweiten Lauf \TODO{bestätigen: erster Lauf vor dem 5.08. im alten Konto, Wiederholung lieferte ähnliche Zahlen (rund 12.000 Positive)}.
+
+\paragraph{Was beim ersten Durchlauf des Bootstrap-Skripts schiefging.} Der Neuaufbau am 12.\,August lief nicht auf Anhieb durch, und jede Panne ist im Skript heute abgefangen:
+\begin{itemize}
+  \item \emph{PowerShell-Fehlerbehandlung:} Mit \texttt{\$ErrorActionPreference = "Stop"} bricht Windows PowerShell~5.1 bei \emph{jeder} stderr-Ausgabe eines nativen Programms ab, auch bei Exit-Code~0. Phase~8 stoppte deshalb ohne echten Fehler; die Fehlerprüfung läuft seitdem explizit über Exit-Codes.
+  \item \emph{Elastic IP nicht verknüpft:} Das Zuweisen der Elastic IP schlug fehl, weil die Instanz noch nicht bereit war; wegen des geänderten Fehlermodus blieb das unbemerkt. Die Webapp war unter der Elastic IP nicht erreichbar, bis die Zuordnung von Hand nachgeholt wurde. Das Skript wartet nun auf \texttt{instance-running} und prüft die Zuordnung mit Wiederholungen.
+  \item \emph{Fargate-Cluster fehlte:} Beim ersten Bulk-Start meldete die Webapp \texttt{ClusterNotFoundException}, weil die Fargate-Phase nicht vollständig durchgelaufen war. Ein Teil-Durchlauf (\texttt{-SkipImage -SkipEc2 -SkipCicd}) holte sie nach, was die Idempotenz bestätigt.
+\end{itemize}
+
+\paragraph{Die Budgetsperre im Detail.} Nach rund zwei Wochen Abwesenheit war der Pool eingefroren. Eine Prüfung aller Regionen ergab keinen aktiven Verursacher; das Budget war über viele Wochen aus der immer laufenden EC2-Instanz, den Fargate-Läufen, dem S3-Speicher und den ersten Bedrock-Läufen aufgelaufen. Als Konsequenz wurden die Bedrock-Aufrufe für die bereits vorhandenen Treffer ausgesetzt, und es wurde eine Terminierungsgarantie eingebaut, die ein „Hängen“ als Kostenursache ausschließt (Abschnitt~\ref{sec:aws-kosten}).
+
+\section{Kosten und Kostenkontrolle}\label{sec:aws-kosten}
+Da Cost Explorer gesperrt ist, sind die Kosten in \cref{fig:B02_kosten} \emph{Schätzungen} aus Laufzeiten und Preislisten; bei der Abgabe sollen sie durch Abrechnungswerte ersetzt werden \TODO{Kosten bei Betreuer/Account-Verwaltung erfragen; Werte in bericht/daten/kosten.csv ersetzen}. Als Preisbasis dienen: Fargate 4\,vCPU/16\,GB rund 0,23\,\$/h, t3.small samt EBS rund 17\,\$/Monat, S3 rund 0,024\,\$/GB und Monat, Claude Haiku 4.5 rund 1\,\$ je Million Eingabe- und 5\,\$ je Million Ausgabetoken (bei etwa 2.300 Eingabetoken je Dokument). Die geschätzten Gesamtkosten liegen bei etwa \zKostenGesamt{}\,\$.
+
+\abb[0.85]{htbp}{B02_kosten}{Geschätzte Kosten nach Posten. Schraffierte Balken sind Schätzungen (Abrechnung ausstehend).}
+
+Bemerkenswert ist die Rangfolge: Nicht der Crawl dominiert die Kosten, sondern die \emph{Qualitätssicherung} durch das LLM (rund \zKostenBedrock{}\,\$) und der dauerhaft laufende Webapp-Server (rund \zKostenEc{}\,\$). Die eigentlichen Großläufe kosten zusammen nur wenige Dollar. Das bestätigt die Grundidee des Aufbaus, Rechenlast kurzlebig und Dauerbetrieb klein zu halten, und zeigt zugleich, dass eine Dauerressource im Budget des Sandbox-Pools relevanter ist als jeder Crawl.
+
+\paragraph{Terminierungsgarantie.} Die Budgetsperre führte zu einem dreischichtigen Schutz gegen unbegrenzte Laufzeit: (1)~\texttt{DOWNLOAD\_TIMEOUT} von 60\,s je Anfrage, (2)~\texttt{CLOSESPIDER\_TIMEOUT} als Zeitlimit je Hochschule und (3)~ein Wachhund (\texttt{bulk\_run.\_arm\_runtime\_watchdog}), ein Daemon-Timer, der nach \texttt{BULK\_MAX\_RUNTIME\_SECONDS} den Prozess mit \texttt{os.\_exit(2)} beendet, auch wenn der Reactor hängt. Dadurch endet der ECS-Task und die Abrechnung. Die Funktion wurde getestet und feuert zuverlässig.
+
+\section{Lehren aus dem AWS-Betrieb}
+\begin{enumerate}
+  \item \textbf{Reproduzierbarkeit schlägt Eleganz.} Das Bootstrap-Skript aus AWS-CLI-Befehlen war robuster als der „saubere“ Terraform-Stack, weil es mit einem unbekannten Zielkonto umgehen konnte.
+  \item \textbf{Daten sind wertvoller als Infrastruktur.} Infrastruktur lässt sich neu bauen, Labels und Zwischenergebnisse nicht. Wertvolles gehört lokal gesichert.
+  \item \textbf{Dauerressourcen zählen.} Im Budgetrahmen einer Sandbox ist eine immer laufende Kleininstanz gewichtiger als ein zwölfstündiger Großlauf.
+  \item \textbf{Zugriffsbeschränkungen sind Entwurfsvorgaben.} SCP-Sperren (Bedrock-Mantle, Cost Explorer), kurzlebige Schlüssel und TLS-Proxy erzwangen wiederaufnehmbare Verarbeitung in kleinen Blöcken.
+  \item \textbf{Gerechnet ist nicht gemessen.} Die Lambda-Rechnung des MVPs („zehn Minuten“) war für das Zielbild um etwa den Faktor 40 zu optimistisch; erst Messungen am Großlauf haben die richtige Laufzeitklasse gezeigt.
+\end{enumerate}

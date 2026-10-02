@@ -1,0 +1,14 @@
+# LaTeX-Hilfsdateien
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.bbl
+*.blg
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+# grosse Rohdaten (mit aws s3 ls --recursive erzeugbar)
+daten/s3_objekte.csv

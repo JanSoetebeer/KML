@@ -1,0 +1,48 @@
+\chapter{Fazit und Ausblick}\label{ch:fazit}
+
+\section{Fazit}
+Das Projekt hat aus einem Scrapy-Prototyp eine skalierbare Erhebungs- und Klassifikationsplattform auf AWS gemacht und sie an einem realen, großen Anwendungsfall erprobt: \zDocsTotal{} PDFs von \zUnisTotal{} Hochschulen, zwei Großläufe mit zusammen rund 18~Stunden Laufzeit, \zSpeicherGB{}\,GB Daten, eine Endliste von \zFinalListed{} Dokumenten mit geschätzt \zEstTrue{} echten Modulhandbüchern und einer Abdeckung von \zUnisLikelyPct\,\% der Hochschulen. Der Aufbau ist modular genug, dass ein anderer Dokumenttyp ein neues Profil und ein neues Modell braucht, nicht aber einen neuen Crawler. Das ist die Brücke zu KIWIT.
+
+\Cref{tab:akzeptanz} bewertet die Akzeptanzkriterien aus Kapitel~\ref{ch:einleitung} gegen das Ergebnis.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Akzeptanzkriterien und Ergebnis.}\label{tab:akzeptanz}
+\begin{tabularx}{\linewidth}{@{}p{2.8cm} p{3.0cm} X@{}}
+\toprule
+\textbf{Kriterium} & \textbf{Erfüllt?} & \textbf{Begründung} \\
+\midrule
+A1 vollständig durchsuchen & weitgehend & Alle \zUnisTotal{} Hochschulen wurden bearbeitet; Seiten mit JavaScript, Login oder anderer Domain nicht erreichbar. \\
+A2 alle Handbücher finden (Recall) & \textbf{teilweise} & Etwa 40--47\,\% des Erwartungswerts; 39 Hochschulen ohne Fund, 117 mit Dokumenten, aber ohne bestätigtes Handbuch. \\
+A3 Nicht-Handbücher erkennen (Precision) & ja, durch LLM-Stufe & TF-IDF allein reicht nicht (25--82\,\%); die streng bestätigte Liste ist vom LLM geprüft, der Rest geschätzt $\approx$ 89\,\%. \\
+A4 strukturiert speichern & ja & S3-Ablage mit Manifest (Score, Quelle, Lauf, LLM-Begründung); Transparenz je Entscheidung. Eine Datenbank für Inhalte ist offen. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+Das wichtigste inhaltliche Ergebnis ist \emph{negativ} und nützlich: Der Klassifikator, so gut er auf dem Papier war, genügte als alleiniger Filter nicht. Die Kombination aus billigem Massenfilter und LLM-Zweitstufe war die Antwort, und die Ehrlichkeit der Evaluation (gruppiert nach Hochschule, Pilotstichprobe, korrigierter Auswertungsfehler) hat dieses Ergebnis überhaupt erst sichtbar gemacht. Das wichtigste betriebliche Ergebnis: Eine befristete Sandbox verlangt, dass Aufbau und Daten wiederherstellbar sind.
+
+\section{Ausblick}
+\subsection{Qualität und Recall}
+\begin{itemize}
+  \item \textbf{Schwelle und Modell.} Im Live-Crawl die vorgeschlagene Schwelle (0,8) statt 0,5 verwenden; den Dateinamen als Merkmal aufnehmen (Abschnitt~\ref{ch:klassifikation}); mit den rund 27.700 LLM-Labels als \emph{Hard Negatives} nachtrainieren. Die dazu nötige Retrain-Strecke aus Manifesten (\texttt{ingest --manifest} mit S3-Abruf) ist vorhanden.
+  \item \textbf{Manuelle Referenz.} Die vorbereitete Stichprobe von 120 Dokumenten auswerten, um die LLM-Genauigkeit zu messen.
+  \item \textbf{Verdächtige Hosts.} Die ungeprüften Positive der 159 Hosts mit niedriger Bestätigungsrate LLM-prüfen (rund 15--20\,\$).
+  \item \textbf{Seitenebene statt Dateiebene.} JavaScript-Portale (z.\,B.\ IU) liefern kein PDF; die Klassifikation von gerenderten Katalogseiten ist gebaut und wartet auf einen Einsatz mit Playwright oder Firecrawl.
+  \item \textbf{Manuelle Nachsuche} für die 39 leeren und die kleinen privaten Hochschulen, deren Handbücher nicht online liegen oder hinter Login.
+\end{itemize}
+
+\subsection{Inhaltliche Erschließung}
+Aus „ist ein Modulhandbuch“ soll „was steht darin“ werden: Module, ECTS-Punkte, Lernziele und Prüfungsformen als strukturierte, vergleichbare Daten. Für diese Extraktion ist ein LLM fachlich naheliegend; erst damit lassen sich Studiengänge zählen und systematisch vergleichen, wie es der ursprüngliche Anwendungsfall der FH Wedel verlangt.
+
+\subsection{Plattform und Betrieb}
+\begin{itemize}
+  \item Modell-Artefakte in S3 mit Registry versionieren, sodass Modellwechsel ohne Neubau des Images möglich ist.
+  \item Scoring vom Crawl entkoppeln (S3-Ereignis lösen Klassifikations-Lambda aus) und Jobstatus in einer Tabelle halten (Roadmap Phase~3--4).
+  \item Secrets Manager statt \texttt{.env}-Dateien, echtes TLS-Zertifikat statt selbstsigniertem, SQLite $\to$ RDS bei mehreren Schreibern, Auto-Scaling hinter einem Load Balancer.
+  \item Automatisierte Tests und Monitoring (Fehlerraten, Review-Band-Anteil als Drift-Indikator).
+  \item Webapp nur bei Bedarf betreiben: Die dauerhaft laufende Instanz kostete im Budget mehr als jeder Crawl; ein On-Demand-Betrieb wäre günstiger.
+\end{itemize}
+
+\subsection{Anschluss an KIWIT}
+Für Forschungsprofil~A der KIWIT-Gruppe (Makroebene) lassen sich damit künftig auch KI-bezogene Strategien, Richtlinien und Angebote erheben: Dazu genügen ein neues Extraktionsprofil mit Suchbegriffen, eine neue Spezifikation für die Zweitstufe und ein passendes Trainingsset. Die in diesem Projekt gewonnene Erfahrung, dass \emph{Auffinden} und \emph{Aussortieren} getrennte Probleme sind und beide eine eigene Lösung brauchen, sollte dabei von Beginn an berücksichtigt werden.

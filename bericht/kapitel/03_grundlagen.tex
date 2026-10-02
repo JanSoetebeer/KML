@@ -1,0 +1,47 @@
+\chapter{Grundlagen und Technologiestack}\label{ch:grundlagen}
+
+Leitend für alle Technologieentscheidungen war das Anforderungsprofil eines projektbasierten, aber auf Wiederverwendbarkeit ausgelegten Systems: geringe Betriebskosten, wenig Infrastrukturaufwand, kurze Entwicklungszeit und eine Architektur, die sich sauber erweitern lässt. \Cref{tab:stack} gibt den Gesamtüberblick; die Begründungen der wichtigsten Entscheidungen folgen in den Abschnitten.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Technologiestack im Überblick (Stand Projektende).}\label{tab:stack}
+\begin{tabularx}{\linewidth}{@{}l X l@{}}
+\toprule
+\textbf{Bereich} & \textbf{Technologie und Rolle} & \textbf{Seit} \\
+\midrule
+Crawler & Scrapy (Spider, Pipelines, Dupe-Filter, AutoThrottle); generische Engine mit austauschbaren Extraktionsprofilen & Juni \\
+Webapp & FastAPI + uvicorn, statisches HTML/CSS/JavaScript, SQLite (Nutzer, Rollen, Modelle), bcrypt, Caddy als HTTPS-Proxy & Juni/Juli \\
+Rechnen & AWS Lambda (interaktiv, $\le$ 10 URLs) und AWS Fargate (Bulk); gleiches Container-Image & Juni/Juli \\
+Zustand & S3 (Dokumente, Manifeste, Feedback, Seeds), DynamoDB (Visited-Store) & Juni \\
+Klassifikation & scikit-learn: TF-IDF (Wort- und Zeichen-n-Gramme) + logistische Regression, PyMuPDF zur Textextraktion & Juli \\
+Zweitstufe & Claude Haiku 4.5 über Amazon Bedrock (spezifikationsgesteuerter Prompt), Tesseract-OCR für Scans & August \\
+Discovery & Common Crawl (CDX-Index), Serper (Google-SERP-API), Firecrawl (JS-Rendering) & August \\
+Betrieb & GitHub Actions (OIDC, SSM), Bootstrap-Skript (PowerShell + AWS-CLI), Docker Compose; Terraform nur zeitweise & Juli/August \\
+Auswertung & Python (matplotlib, stdlib-Evaluationspaket), HTML-Berichte, \LaTeX{} & August--Oktober \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Crawler: Scrapy}
+Scrapy liefert die Bausteine für robustes, wiederholtes Crawlen: einen Dupe-Filter innerhalb eines Laufs, konfigurierbare Drosselung (AutoThrottle) und eine Pipeline-Architektur, in die sich Verarbeitungsschritte als austauschbare Klassen einhängen lassen. Genau diese Erweiterbarkeit war ausschlaggebend: Ein neuer Spider, eine neue Pipeline-Stufe oder ein neues Visited-Store-Backend sind jeweils eine zusätzliche Klasse. Die Höflichkeitsregeln (robots.txt nach RFC~9309 \citep{rfc9309}, Verzögerung, identifizierbarer User-Agent) sind Standard, nicht Option.
+
+\section{Webapp: FastAPI und SQLite}
+FastAPI liefert REST-API und statisches Frontend aus demselben Prozess; es entfällt eine separate Frontend-Infrastruktur. Router trennen die Domänen (\texttt{auth}, \texttt{users}, \texttt{roles}, \texttt{models}, \texttt{scrape}). Als Datenhaltung genügt SQLite auf einem Docker-Volume, weil nur ein Prozess schreibt und die Nutzerzahl einstellig ist; das Schema wird idempotent beim Start angelegt. Passwörter liegen als bcrypt-Hash vor, Sitzungen sind signierte 12-Stunden-Tokens. Das Rollenmodell trennt die \emph{Position} (Administrator/User) von fachlichen \emph{Rollen} (zunächst nur „Modulhandbuch“), und Modelle werden über dieselben Rollen Nutzern zugeordnet. Damit lässt sich ein neuer Anwendungsfall mit einer neuen Rolle und einem passenden Modell abbilden, ohne Frontend-Code zu ändern.
+
+\section{Klassifikation: TF-IDF statt Transformer}
+Für „Ist dieses PDF ein Modulhandbuch?“ wurde bewusst eine klassische Pipeline gewählt: TF-IDF \citep{salton1988} über Wort- und Zeichen-n-Gramme und logistische Regression \citep{pedregosa2011}. Zu Projektbeginn standen 202 Dokumente aus 21 Hochschulen zur Verfügung; dafür ist das Finetuning eines Transformers die falsche Werkzeugklasse, während ein regularisiertes lineares Modell zuverlässig funktioniert, in Sekunden trainiert ist und ohne GPU in Lambda und Fargate läuft. Der eigentliche Flaschenhals ist Netzwerk-I/O und PDF-Textextraktion, nicht Matrixmultiplikation. Dass diese Entscheidung für die Massenfilterung richtig, für die Endqualität aber nicht ausreichend war, zeigt Kapitel~\ref{ch:klassifikation}.
+
+\subsection{Evaluationsmetriken}
+Bei ungleichgewichtigen Klassen ist die Fläche unter der Precision-Recall-Kurve (PR-AUC, hier als \emph{average precision}) die Leitmetrik. Precision $P=\frac{TP}{TP+FP}$ gibt an, welcher Anteil der als Modulhandbuch gemeldeten Dokumente wirklich eines ist; Recall $R=\frac{TP}{TP+FN}$, welcher Anteil der echten gefunden wurde. Unsicherheiten von Anteilen werden als Wilson-Intervall \citep{wilson1927} angegeben. Die Schwellen werden nicht auf 0,5 gesetzt, sondern aus den Daten auf ein Recall-Ziel von 95\,\% kalibriert, weil ein übersehenes Handbuch eine Datenlücke ist, ein Fehlalarm dagegen nur wenige Sekunden Review kostet. Die Entscheidung ist dreistufig: \texttt{automatic\_negative}, \texttt{needs\_review} und \texttt{automatic\_positive}.
+
+\section{Cloud-Komponenten}
+Die Wahl von AWS ergab sich aus dem bereitgestellten Hochschul-Account (AWS-Sandbox der FH Wedel). Warum zunächst Lambda gewählt wurde und warum es später durch Fargate ergänzt werden musste, ist Gegenstand von Kapitel~\ref{ch:aws}. Wichtig für die Plattformidee: \emph{ein} Container-Image (Crawler + \texttt{mlclassifier} + Modell) läuft in allen Laufzeitumgebungen (Lambda, Fargate, lokal), nur der Einstiegspunkt unterscheidet sich.
+
+\section{Externe Dienste}
+\begin{itemize}
+  \item \textbf{Common Crawl} \citep{commoncrawl}: freier Webindex; über den CDX-Index lassen sich pro Domain PDF-URLs mit „modul/handbuch“-Mustern finden, ohne die Hochschul-Server zu belasten.
+  \item \textbf{Serper}: Google-SERP-API für Abfragen der Form \texttt{site:<domain> <Begriff>}; erreicht tief verlinkte Dateien, die Common Crawl nicht kennt. Es konnte nur die kostenlose Stufe genutzt werden.
+  \item \textbf{Firecrawl}: rendert JavaScript-Seiten und liefert Link-Karten; im Projekt vorbereitet, aber nur ansatzweise getestet.
+  \item \textbf{Amazon Bedrock} mit Claude Haiku 4.5 \citep{anthropic2025haiku}: Zweitstufen-Klassifikation für die Grauzone.
+  \item \textbf{Tesseract}: OCR für gescannte PDFs ohne Textebene.
+\end{itemize}

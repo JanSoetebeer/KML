@@ -1,0 +1,415 @@
+{
+ "docs_total": 164396,
+ "tiers": {
+  "tfidf_negative": 114926,
+  "tfidf_high": 13741,
+  "llm_confirmed": 7367,
+  "llm_rejected": 20308,
+  "unresolved": 1658,
+  "llm_lowconf": 3,
+  "tfidf_other": 6393
+ },
+ "by_source": {
+  "deep_run": {
+   "tfidf_negative": 93139,
+   "tfidf_high": 13741,
+   "llm_confirmed": 6353,
+   "llm_rejected": 18412,
+   "unresolved": 539,
+   "llm_lowconf": 3
+  },
+  "seeds_only": {
+   "unresolved": 22,
+   "tfidf_negative": 146,
+   "tfidf_other": 174,
+   "llm_rejected": 3
+  },
+  "run_full_aug": {
+   "tfidf_negative": 21641,
+   "tfidf_other": 6219,
+   "llm_rejected": 1893,
+   "unresolved": 1097,
+   "llm_confirmed": 1014
+  }
+ },
+ "llm_reviewed_docs": 27678,
+ "pilot": {
+  "n": 400,
+  "confirmed": 330,
+  "precision": 0.825,
+  "ci95": [
+   0.7847204162241496,
+   0.859096367386058
+  ]
+ },
+ "estimate_true_in_tfidf_high": {
+  "mid": 11336,
+  "low": 10783,
+  "high": 11805
+ },
+ "final_strict": 7367,
+ "final_likely_estimated_true": {
+  "mid": 18703,
+  "low": 18150,
+  "high": 19172
+ },
+ "final_likely_listed": 21108,
+ "initial_tfidf_positive": 44437,
+ "precision_by_score_bin": [
+  {
+   "bin": "0,3–0,4",
+   "n": 81,
+   "confirm_rate": 0.037037037037037035,
+   "ci_lo": 0.012674884458548488,
+   "ci_hi": 0.10332481380268184
+  },
+  {
+   "bin": "0,4–0,5",
+   "n": 121,
+   "confirm_rate": 0.0,
+   "ci_lo": 0,
+   "ci_hi": 0.03077179401737882
+  },
+  {
+   "bin": "0,5–0,6",
+   "n": 5753,
+   "confirm_rate": 0.07752476968538154,
+   "ci_lo": 0.07089279517527722,
+   "ci_hi": 0.08472058838559754
+  },
+  {
+   "bin": "0,6–0,7",
+   "n": 4463,
+   "confirm_rate": 0.12704458884158637,
+   "ci_lo": 0.11759377779651797,
+   "ci_hi": 0.13713690260190942
+  },
+  {
+   "bin": "0,7–0,8",
+   "n": 4444,
+   "confirm_rate": 0.3031053105310531,
+   "ci_lo": 0.28976720882226586,
+   "ci_hi": 0.3167835280564934
+  },
+  {
+   "bin": "0,8–0,9",
+   "n": 6306,
+   "confirm_rate": 0.4429115128449096,
+   "ci_lo": 0.4306896937578351,
+   "ci_hi": 0.45520284592176635
+  },
+  {
+   "bin": "0,9–1,0",
+   "n": 400,
+   "confirm_rate": 0.825,
+   "ci_lo": 0.7847204162241496,
+   "ci_hi": 0.859096367386058
+  }
+ ],
+ "llm_batches": {
+  "llm_reviewed.jsonl": {
+   "confirmed": 1845,
+   "rejected": 4220
+  },
+  "llm_mid": {
+   "confirmed": 5153,
+   "rejected": 15813
+  },
+  "llm_pilot.jsonl": {
+   "confirmed": 330,
+   "rejected": 70
+  },
+  "llm_ocr.jsonl": {
+   "confirmed": 42,
+   "rejected": 205
+  }
+ },
+ "false_positive_types": {
+  "Einzelnes Modul / Datenblatt / Syllabus": 3434,
+  "Sonstiges": 1755,
+  "Vorlesungs-/Veranstaltungsverzeichnis": 730,
+  "Studienverlaufs-/Studienplan": 2076,
+  "Prüfungs-/Studienordnung, Satzung": 8626,
+  "Modul-/Wahlpflichtkatalog (unvollständig)": 925,
+  "Antrag, Formular, Merkblatt, Flyer": 426
+ },
+ "n_false_positives_by_llm": 17972,
+ "filename_keyword_effect": {
+  "Dateiname enthält „modul/handbuch/mhb“": [
+   {
+    "rate": 35.69444444444444,
+    "n": 720
+   },
+   {
+    "rate": 64.09783110290725,
+    "n": 2167
+   },
+   {
+    "rate": 90.03831417624522,
+    "n": 783
+   }
+  ],
+  "ohne Stichwort im Dateinamen": [
+   {
+    "rate": 7.708947885939037,
+    "n": 10170
+   },
+   {
+    "rate": 29.447729778490526,
+    "n": 9977
+   },
+   {
+    "rate": 40.76246334310851,
+    "n": 682
+   }
+  ]
+ },
+ "ocr": {
+  "Gescannte PDFs ohne Textebene (Review-Band)": 3619,
+  "OCR durchgeführt": 3553,
+  "Text per OCR gewonnen": 3118,
+  "Score ≥ 0,5 → an LLM": 247,
+  "LLM bestätigt": 42
+ },
+ "unis_total": 404,
+ "unis_with_mh_strict": 248,
+ "unis_with_mh_likely": 263,
+ "unis_with_ge10_likely": 161,
+ "unis_with_ge10_strict": 110,
+ "mh_per_uni_median_likely": 4.0,
+ "top10_unis_share_likely": 0.36820162971385256,
+ "seg_type": {
+  "Fachhochschule / HAW": {
+   "n": 194,
+   "with_mh": 117,
+   "mh": 6069
+  },
+  "Universität": {
+   "n": 120,
+   "with_mh": 91,
+   "mh": 13435
+  },
+  "Künstlerische Hochschule": {
+   "n": 56,
+   "with_mh": 39,
+   "mh": 1346
+  },
+  "Verwaltungshochschule": {
+   "n": 27,
+   "with_mh": 12,
+   "mh": 94
+  }
+ },
+ "seg_traeger": {
+  "öffentlich-rechtlich": {
+   "n": 258,
+   "with_mh": 201,
+   "mh": 20227
+  },
+  "privat": {
+   "n": 108,
+   "with_mh": 42,
+   "mh": 561
+  },
+  "kirchlich": {
+   "n": 37,
+   "with_mh": 19,
+   "mh": 297
+  }
+ },
+ "seg_size": {
+  "<1.000": {
+   "n": 146,
+   "with_mh": 64,
+   "mh": 1031
+  },
+  "1.000–5.000": {
+   "n": 113,
+   "with_mh": 79,
+   "mh": 3482
+  },
+  "5.000–15.000": {
+   "n": 87,
+   "with_mh": 69,
+   "mh": 5267
+  },
+  "15.000–30.000": {
+   "n": 36,
+   "with_mh": 35,
+   "mh": 8458
+  },
+  ">30.000": {
+   "n": 18,
+   "with_mh": 14,
+   "mh": 2845
+  }
+ },
+ "seg_land": {
+  "Baden-Württemberg": {
+   "n": 68,
+   "with_mh": 44,
+   "mh": 2419
+  },
+  "Nordrhein-Westfalen": {
+   "n": 62,
+   "with_mh": 45,
+   "mh": 4538
+  },
+  "Bayern": {
+   "n": 43,
+   "with_mh": 32,
+   "mh": 3800
+  },
+  "Berlin": {
+   "n": 34,
+   "with_mh": 16,
+   "mh": 600
+  },
+  "Hessen": {
+   "n": 33,
+   "with_mh": 15,
+   "mh": 1480
+  },
+  "Niedersachsen": {
+   "n": 30,
+   "with_mh": 22,
+   "mh": 1186
+  },
+  "Brandenburg": {
+   "n": 20,
+   "with_mh": 10,
+   "mh": 403
+  },
+  "Rheinland-Pfalz": {
+   "n": 20,
+   "with_mh": 13,
+   "mh": 752
+  },
+  "Sachsen": {
+   "n": 20,
+   "with_mh": 15,
+   "mh": 952
+  },
+  "Hamburg": {
+   "n": 17,
+   "with_mh": 14,
+   "mh": 1153
+  },
+  "Schleswig-Holstein": {
+   "n": 13,
+   "with_mh": 8,
+   "mh": 837
+  },
+  "Thüringen": {
+   "n": 13,
+   "with_mh": 8,
+   "mh": 498
+  },
+  "Sachsen-Anhalt": {
+   "n": 10,
+   "with_mh": 7,
+   "mh": 1059
+  },
+  "Bremen": {
+   "n": 7,
+   "with_mh": 6,
+   "mh": 1238
+  },
+  "Mecklenburg-Vorpommern": {
+   "n": 7,
+   "with_mh": 5,
+   "mh": 165
+  },
+  "Saarland": {
+   "n": 6,
+   "with_mh": 2,
+   "mh": 5
+  }
+ },
+ "flags": {
+  "Vor der Bereinigung (TF-IDF-Positive)": {
+   "no_docs_no_seeds": 39,
+   "no_positive": 44,
+   "low_recall": 28,
+   "ok": 293
+  },
+  "Nach der Bereinigung inkl. ≥ 0,9 ungeprüft": {
+   "no_docs_no_seeds": 39,
+   "no_positive": 102,
+   "low_recall": 43,
+   "ok": 220
+  },
+  "Nach der Bereinigung nur LLM-bestätigt": {
+   "no_docs_no_seeds": 39,
+   "no_positive": 117,
+   "low_recall": 51,
+   "ok": 197
+  }
+ },
+ "top_hosts": {
+  "mhb.uni-augsburg.de": 1801,
+  "www.uni-bremen.de": 949,
+  "f07-studieninfo.web.th-koeln.de": 783,
+  "www.uni-bamberg.de": 608,
+  "www.bekanntmachungen.ovgu.de": 538,
+  "www.uni-hamburg.de": 524,
+  "www.wiwi.kit.edu": 434,
+  "cs.tu-dortmund.de": 429,
+  "pubdoc.th-luebeck.de": 344,
+  "mos.uni-halle.de": 332,
+  "mediapool.hm.edu": 329,
+  "www-docs.b-tu.de": 295,
+  "www.uni-flensburg.de": 293,
+  "www.hsbi.de": 292,
+  "tu-freiberg.de": 269,
+  "www.mach.kit.edu": 268,
+  "www.h-ka.de": 248,
+  "www.tu-braunschweig.de": 246,
+  "www.dijon.uni-mainz.de": 223,
+  "www.fernuni-hagen.de": 221
+ },
+ "throughput": {
+  "Aug-Lauf (12.08.)": {
+   "hours": 7,
+   "docs": 65944,
+   "peak_docs_per_hour": 11932
+  },
+  "Deep Run (16.–17.09.)": {
+   "hours": 13,
+   "docs": 132193,
+   "peak_docs_per_hour": 14359
+  }
+ },
+ "year_in_filename": {
+  "strict_with_year": 4336,
+  "strict_without": 3031,
+  "likely_with_year": 12963,
+  "likely_without": 8145
+ },
+ "runs": {
+  "aug_urls": 65773,
+  "deep_urls": 132187,
+  "overlap_urls": 33883,
+  "aug_hosts": 743,
+  "deep_hosts": 1165,
+  "hosts_only_aug": 296,
+  "hosts_only_deep": 718,
+  "aug_raw_pos": 11579,
+  "deep_raw_pos": 37993
+ },
+ "recall_gap": {
+  "neg_docs_0.3_0.5_unreviewed": 18252,
+  "estimated_missed_mh": 383
+ },
+ "dedup": {
+  "likely_docs": 21108,
+  "likely_unique_host_filename": 18268,
+  "strict_docs": 7367,
+  "strict_unique_host_filename": 5947
+ },
+ "precision_gap": {
+  "training_cv_precision": 96.5,
+  "production_mid_0.5_0.9": 24.577888009157682,
+  "production_high_pilot": 82.5
+ }
+}

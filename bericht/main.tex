@@ -1,0 +1,133 @@
+% =====================================================================================
+% Projektbericht "Webscraper für Modulhandbücher mit AWS"  (Methoden des Machine Learning, SS 2026)
+% Bauen:  siehe bericht/README.md  (latexmk -pdf main.tex  bzw.  bericht/build.ps1)
+% Zahlen und Grafiken kommen aus  zahlen.tex / bilder/  (erzeugt von make_report_charts.py).
+% Offene Stellen sind mit \TODO{...} gelb markiert, Platzhalter für Sascha Lauk orange.
+% =====================================================================================
+\documentclass[a4paper,11pt,headings=small,parskip=half-,numbers=noenddot,bibliography=totoc]{scrreprt}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[ngerman]{babel}
+\usepackage[autostyle]{csquotes}
+\usepackage{microtype}
+\usepackage[htt]{hyphenat}
+\usepackage{xurl}
+\usepackage[top=2.6cm,bottom=2.6cm,left=2.8cm,right=2.4cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{rotating}
+\usepackage{siunitx}
+\usepackage{amsmath}
+\usepackage{listings}
+\usepackage[hang]{footmisc}
+\usepackage{tikz}
+\usetikzlibrary{positioning,fit,arrows.meta,shapes.geometric,backgrounds,calc}
+\usepackage[numbers]{natbib}
+\usepackage[hidelinks,pdfusetitle]{hyperref}
+\usepackage[nameinlink,ngerman]{cleveref}
+
+\renewcommand{\_}{\textunderscore\allowbreak{}}
+\sisetup{locale=DE,group-separator={.},group-minimum-digits=4}
+\captionsetup{font=small,labelfont=bf,format=hang}
+\setlist{itemsep=1pt,topsep=3pt}
+\setlength{\emergencystretch}{2em}
+\renewcommand{\arraystretch}{1.15}
+\graphicspath{{bilder/}}
+
+\lstset{basicstyle=\ttfamily\footnotesize,breaklines=true,frame=single,
+  framerule=0.3pt,rulecolor=\color{black!25},backgroundcolor=\color{black!3},
+  columns=fullflexible,keepspaces=true,showstringspaces=false,
+  literate={ä}{{\"a}}1 {ö}{{\"o}}1 {ü}{{\"u}}1 {Ä}{{\"A}}1 {Ö}{{\"O}}1 {Ü}{{\"U}}1 {ß}{{\ss}}1}
+
+% ---- Markierungen für offene Stellen ------------------------------------------------
+\newcommand{\TODO}[1]{\par\smallskip\noindent\colorbox{yellow!70}{\parbox{0.94\linewidth}{\footnotesize\textbf{TODO:} #1}}\par\smallskip}
+\newcommand{\saschaPH}[1]{\par\smallskip\noindent\colorbox{orange!35}{\parbox{0.94\linewidth}{\footnotesize\textbf{[Sascha Lauk:} #1\textbf{]}}}\par\smallskip}
+\newcommand{\saschaCell}{\colorbox{orange!35}{\footnotesize [Sascha]}}
+\newcommand{\schaetzung}{\textsuperscript{\textit{(Schätzung)}}}
+
+% ---- Zahlen & Diagramme ------------------------------------------------------------
+\input{zahlen.tex}
+\input{bilder/diagramme.tex}
+\input{bilder/architektur.tex}
+
+% Hilfsmakro: Abbildung mit PNG
+\newcommand{\abb}[4][0.95]{%
+  \begin{figure}[#2]\centering
+    \includegraphics[width=#1\linewidth]{#3}
+    \caption{#4}\label{fig:#3}
+  \end{figure}}
+
+\title{Projektbericht\\[0.4em]\Large Webscraper für Modulhandbücher mit AWS\\[0.2em]\large Skalierbare Erhebung und Klassifikation von Modulhandbüchern deutscher Hochschulen}
+\author{Jan Soetebeer \and Sascha Lauk}
+\date{Oktober 2026}
+\subject{Modul „Methoden des Machine Learning“ \textperiodcentered{} FH Wedel \textperiodcentered{} Sommersemester 2026}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{1.5cm}
+  {\large FH Wedel \textperiodcentered{} Master Informatik\par}
+  {\normalsize Modul „Methoden des Machine Learning“ \textperiodcentered{} Sommersemester 2026\par}
+  \vspace{2.2cm}
+  {\Huge\bfseries Projektbericht\par}
+  \vspace{0.8cm}
+  {\LARGE Webscraper für Modulhandbücher mit AWS\par}
+  \vspace{0.5cm}
+  {\large Skalierbare Erhebung und Klassifikation von\\Modulhandbüchern deutscher Hochschulen\par}
+  \vspace{2.5cm}
+  {\large Jan Soetebeer \quad\textperiodcentered\quad Sascha Lauk\par}
+  \vspace{1.2cm}
+  {\normalsize Oktober 2026\par}
+  \vfill
+  {\small Entstanden im Kontext der Forschungsgruppe KIWIT (BMFTR-gefördert), Forschungsprofil A (Makroebene)\par}
+  \vspace{0.3cm}
+  {\footnotesize Entwurfsstand: Zahlen, die noch von laufenden LLM-Prüfungen abhängen, sind aus \texttt{auswertung/data/kennzahlen.json} generiert\\und werden vor der Abgabe aktualisiert (siehe Anhang~\ref{app:repro}).\par}
+\end{titlepage}
+
+\pagenumbering{roman}
+
+\chapter*{Zusammenfassung}
+\addcontentsline{toc}{chapter}{Zusammenfassung}
+Dieser Bericht dokumentiert Entwicklung, Betrieb und Evaluation eines modularen Web-Crawlers, der öffentlich zugängliche Modulhandbücher deutscher Hochschulen erhebt und mit Methoden des Machine Learning von anderen PDF-Dokumenten unterscheidet. Der Bericht beschreibt nicht nur das Ergebnis, sondern vor allem den Weg dorthin: drei Architekturgenerationen auf AWS (von einer einzelnen Lambda-Funktion über Fargate-Bulk-Läufe bis zu einer Pipeline mit Discovery, OCR und LLM-Zweitstufe), die eingeschlagenen und wieder verworfenen Ansätze sowie die Rückschläge im Betrieb, darunter der Verlust der AWS-Sandbox und die Budget-Sperre.
+
+Im Endstand wurden \zDocsTotal{} verschiedene PDFs von \zUnisTotal{} Hochschulen heruntergeladen (\zSpeicherObjekte{} S3-Objekte, \zSpeicherGB{}\,GB; zwei Großläufe von \zDauerAug{}\,h und \zDauerDeep{}\,h). Der TF-IDF-Klassifikator erreichte in der gruppierten Kreuzvalidierung eine Precision von \zTrainPrec{}\,\%, im realen Crawl jedoch nur \zMidPrec{}\,\% (Score 0,5--0,9) bzw. \zPilotPct{}\,\% (Score $\ge$ 0,9). Erst eine LLM-Zweitstufe (Claude Haiku 4.5 auf Amazon Bedrock) für \zLLMReviewed{} Dokumente brachte belastbare Qualität: \zLLMConfirmed{} Modulhandbücher sind LLM-bestätigt, zusammen mit den ungeprüften Treffern oberhalb von Score 0,9 ergibt sich eine Endliste von \zFinalListed{} Dokumenten, von denen schätzungsweise \zEstTrue{} echte Modulhandbücher sind. \zUnisLikely{} von \zUnisTotal{} Hochschulen (\zUnisLikelyPct{}\,\%) sind abgedeckt. Der Bericht diskutiert Grenzen (Recall, LLM als Referenz, Kosten) und gibt eine Hochrechnung für eine deutschlandweite Vollerhebung.
+
+\vspace{0.8em}
+\noindent\textbf{Schlüsselwörter:} Web Scraping, Scrapy, AWS Lambda, AWS Fargate, Dokumentklassifikation, TF-IDF, LLM-Review, Amazon Bedrock, Modulhandbücher.
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\clearpage
+\pagenumbering{arabic}
+
+\input{kapitel/01_einleitung}
+\input{kapitel/02_projektverlauf}
+\input{kapitel/03_grundlagen}
+\input{kapitel/04_architektur}
+\input{kapitel/05_aws}
+\input{kapitel/06_crawler}
+\input{kapitel/07_klassifikation}
+\input{kapitel/08_ergebnisse}
+\input{kapitel/09_diskussion}
+\input{kapitel/10_sascha}
+\input{kapitel/11_fazit}
+
+\appendix
+\input{kapitel/anhang}
+
+\bibliographystyle{plainnat}
+\bibliography{literatur}
+
+\end{document}

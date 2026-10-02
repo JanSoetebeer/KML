@@ -1,0 +1,116 @@
+% Architekturdiagramme v1-v3 (TikZ). Styles stehen in diagramme.tex.
+
+% ---------------------------------------------------------------- Architektur v1 -----------
+\newcommand{\archA}{%
+\begin{tikzpicture}[x=1cm,y=1cm,every node/.style={transform shape},scale=0.92]
+  \node[ext] (user) at (0,0) {Nutzer\\Browser};
+  \node[comp] (caddy) at (2.5,0) {Caddy\\HTTPS};
+  \node[comp] (api) at (5.2,0.6) {FastAPI\\+ uvicorn};
+  \node[store] (sqlite) at (5.2,-1.6) {SQLite\\Nutzer/Rollen};
+  \begin{scope}[on background layer]
+    \node[layer,fit=(caddy)(api)(sqlite),label={[ll]above:EC2 t3.small (Docker Compose)}] (ec2) {};
+  \end{scope}
+  \node[comp] (jr) at (9.8,0.6) {JobRunner\\(1 Job je URL)};
+  \node[comp] (spider) at (12.6,0.6) {DocumentSpider\\Scrapy, Tiefe 2};
+  \node[comp] (pipe) at (15.4,0.6) {Pipelines\\Local/S3};
+  \begin{scope}[on background layer]
+    \node[layer,fit=(jr)(spider)(pipe),label={[ll]above:AWS Lambda (Container-Image, 15\,min Limit)}] (lam) {};
+  \end{scope}
+  \node[store] (ddb) at (9.8,-2.3) {DynamoDB\\Visited-Store};
+  \node[ext] (web) at (12.6,-2.3) {Hochschul-\\webseiten};
+  \node[store] (s3) at (15.4,-2.3) {S3\\PDFs};
+  \draw[arr] (user) -- (caddy);
+  \draw[arr] (caddy) -- (api);
+  \draw[arr] (api) -- (sqlite);
+  \draw[arr] (api) -- node[lbl,above]{invoke (synchron)} (jr);
+  \draw[arr] (jr) -- (spider);
+  \draw[arr] (spider) -- (pipe);
+  \draw[arr] (pipe) -- (s3);
+  \draw[arr] (jr) -- (ddb);
+  \draw[arr] (spider) -- (web);
+\end{tikzpicture}}
+
+% ---------------------------------------------------------------- Architektur v2 -----------
+\newcommand{\archB}{%
+\begin{tikzpicture}[x=1cm,y=1cm,every node/.style={transform shape},scale=0.86]
+  \node[newc] (train) at (0,4.8) {Entwickler-Laptop\\Training \texttt{mlclassifier}};
+  \node[newc] (gh) at (4.6,4.8) {GitHub Actions\\(OIDC)};
+  \node[newc] (ecr) at (8.2,4.8) {ECR\\Container-Image};
+  \node[newc] (ssm) at (4.6,3.2) {SSM\\Run Command};
+  \node[ext] (user) at (0,0.8) {Nutzer\\Browser};
+  \node[comp] (caddy) at (2.3,0.8) {Caddy};
+  \node[comp] (api) at (4.6,1.5) {FastAPI};
+  \node[newc] (rev) at (4.6,-0.3) {Review-UI\\Feedback};
+  \node[store] (sqlite) at (2.3,-1.1) {SQLite};
+  \begin{scope}[on background layer]
+    \node[layer,fit=(caddy)(api)(rev)(sqlite),label={[ll]below:EC2 (Webapp)}] (ec2) {};
+  \end{scope}
+  \node[newc] (route) at (7.6,0.8) {Routing nach\\URL-Anzahl};
+  \node[comp] (lam) at (10.6,2.2) {Lambda\\$\le$10 URLs};
+  \node[newc] (far) at (10.6,-0.2) {Fargate\\Bulk-Crawl};
+  \node[newc] (cls) at (13.8,1.0) {Klassifikation\\TF-IDF + LogReg};
+  \begin{scope}[on background layer]
+    \node[layer,fit=(lam)(far)(cls),label={[ll]below:gleiches Container-Image}] (cmp) {};
+  \end{scope}
+  \node[newstore] (fb) at (4.6,-3.4) {S3 feedback/\\Verdikte};
+  \node[store] (ddb) at (9.0,-3.4) {DynamoDB\\Visited};
+  \node[store] (s3) at (13.8,-3.4) {S3\\PDFs, Manifeste};
+  \draw[narr] (train) -- node[lbl,above]{git push (Modell)} (gh);
+  \draw[narr] (gh) -- (ecr);
+  \draw[narr] (gh) -- (ssm);
+  \draw[narr] (ssm) -- (ssm |- ec2.north);
+  \draw[narr] (ecr) -- node[lbl,right,pos=0.45]{update-function-code} (lam.north);
+  \draw[arr] (user) -- (caddy);
+  \draw[arr] (caddy) -- (api);
+  \draw[arr] (api) -- (route);
+  \draw[narr] (route) -- (lam);
+  \draw[narr] (route) -- (far);
+  \draw[arr] (lam) -- (cls);
+  \draw[narr] (far) -- (cls);
+  \draw[arr] (cls) -- (s3);
+  \draw[narr] (rev) -- (fb);
+  \draw[narr] (fb.west) -- ++(-5.4,0) |- node[lbl,pos=0.25,left]{Nachtraining} (train.west);
+  \draw[arr] (far) -- (ddb);
+\end{tikzpicture}}
+
+% ---------------------------------------------------------------- Architektur v3 -----------
+\newcommand{\archC}{%
+\begin{tikzpicture}[x=1cm,y=1cm,every node/.style={transform shape},scale=0.80]
+  \node[newc] (cc) at (0,5.2) {Common Crawl\\CDX-Index};
+  \node[newc] (serp) at (0,3.9) {Serper\\(Google-SERP)};
+  \node[newc] (fire) at (0,2.6) {Firecrawl\\(JS-Rendering)};
+  \node[oldc] (gcse) at (0,1.2) {Google CSE,\\DuckDuckGo};
+  \node[newc] (disc) at (3.4,4.4) {Discovery-Modul\\Seeds};
+  \node[newstore] (seeds) at (7.0,4.7) {S3 discovery/\\Seed-Listen};
+  \node[ext] (web) at (3.4,0.2) {Hochschul-\\webseiten};
+  \node[newc] (spider) at (7.2,0.9) {Spider: Best-First,\\Sitemap, Sektions-Cap};
+  \node[newc] (seedmode) at (10.4,2.4) {Seeds-only-Modus\\Robots-Bypass};
+  \node[comp] (cls) at (10.4,0.6) {Klassifikation\\TF-IDF};
+  \begin{scope}[on background layer]
+    \node[layer,fit=(spider)(seedmode)(cls),label={[ll]below:Fargate-Task (4 vCPU, 16\,GB, Watchdog)}] (far) {};
+  \end{scope}
+  \node[store] (ddb) at (7.2,-2.2) {DynamoDB\\Visited};
+  \node[store] (s3) at (13.8,0.8) {S3\\193.438 Objekte\\154\,GB};
+  \node[newc] (ocr) at (13.8,4.0) {OCR (Laptop)\\Tesseract};
+  \node[newc] (llm) at (13.8,-1.9) {LLM-Review (Laptop)\\Bedrock Haiku 4.5};
+  \node[newc] (eval) at (10.4,-3.7) {Evaluation \&\\Auswertung (23 Grafiken)};
+  \node[comp] (webapp) at (3.4,-2.4) {Webapp (EC2)\\Schalter: Discovery,\\Rendering};
+  \node[newc] (boot) at (3.4,-4.6) {Bootstrap-Skript\\(baut alles neu auf)};
+  \draw[narr] (cc) -- (disc);
+  \draw[narr] (serp) -- (disc);
+  \draw[narr] (fire) -- (disc);
+  \draw[darr,orange!80!black] (gcse) -- (disc);
+  \draw[narr] (disc) -- (seeds);
+  \draw[narr] (seeds) -- (seedmode);
+  \draw[arr] (spider) -- (cls);
+  \draw[arr] (seedmode) -- (cls);
+  \draw[arr] (web) -- (spider);
+  \draw[arr] (spider) -- (ddb);
+  \draw[arr] (cls) -- (s3);
+  \draw[narr] (s3) -- (ocr);
+  \draw[narr] (s3) -- (llm);
+  \draw[narr] (llm) -- (eval);
+  \draw[narr] (ocr.east) to[out=0,in=0,looseness=1.3] (llm.east);
+  \draw[arr] (webapp.north) -- (web.south);
+  \draw[narr] (boot) -- (webapp);
+\end{tikzpicture}}

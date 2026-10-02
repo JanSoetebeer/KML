@@ -1,0 +1,117 @@
+\chapter{Ergebnisse und Kennzahlen}\label{ch:ergebnisse}
+
+Dieses Kapitel beantwortet die Leitfragen aus Kapitel~\ref{ch:einleitung} mit Zahlen. Alle Werte stammen aus der Abschlussauswertung (\texttt{auswertung/data/kennzahlen.json}) und den S3-Auflistungen und sind im Bericht als Makros hinterlegt, sodass sie nach den abschließenden LLM-Prüfungen automatisch aktualisiert werden. \TODO{Nach Abschluss der laufenden LLM-Prüfung der ca.\ 6.000 verdächtigen Dokumente: build.ps1 ausführen, Zahlen und Text prüfen}.
+
+\section{Kennzahlen auf einen Blick}
+\begin{table}[htbp]
+\centering\small
+\caption{Zentrale Kennzahlen des Projekts.}\label{tab:kennzahlen}
+\begin{tabularx}{\linewidth}{@{}X r@{}}
+\toprule
+\textbf{Kennzahl} & \textbf{Wert} \\
+\midrule
+Hochschulen in der Hochschulliste & \zUnisTotal \\
+Heruntergeladene PDFs (URL-eindeutig, alle Läufe) & \zDocsTotal \\
+Objekte / Datenmenge in S3 (inkl.\ physischer Duplikate) & \zSpeicherObjekte{} / \zSpeicherGB{}\,GB \\
+Laufzeit Großlauf August / Deep Run & \zDauerAug{}\,h / \zDauerDeep{}\,h \\
+Durchsatz August / Deep Run (PDFs pro Stunde im Mittel) & \zRateAug{} / \zRateDeep \\
+TF-IDF-Positive vor jeder Prüfung (Schwelle 0,5) & \zInitialPositive \\
+Vom LLM geprüfte Dokumente & \zLLMReviewed \\
+\quad davon bestätigt / verworfen & \zLLMConfirmed{} / \zLLMRejected \\
+Endliste streng (nur LLM-bestätigt) & \zFinalStrict \\
+Endliste erweitert (zusätzlich TF-IDF $\ge$ 0,9, ungeprüft) & \zFinalListed \\
+Geschätzt echte Modulhandbücher in der erweiterten Liste & \zEstTrue{} (\zEstTrueLow--\zEstTrueHigh) \\
+Eindeutig nach Host und Dateiname (streng / erweitert) & \zUniqueStrict{} / \zUniqueLikely \\
+Hochschulen mit $\ge$ 1 Handbuch (streng / erweitert) & \zUnisStrict{} (\zUnisStrictPct\,\%) / \zUnisLikely{} (\zUnisLikelyPct\,\%) \\
+Hochschulen ohne jedes Dokument bzw.\ ohne Fund & \zUnisNone \\
+Median Handbücher je Hochschule (erweitert) & \zMedianMH \\
+Anteil der zehn ergiebigsten Hochschulen am Ergebnis & \zTopTenShare\,\% \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\abb[0.9]{htbp}{01_trichter}{Trichter vom Crawl (\zDocsTotal{} PDFs) über die TF-IDF-Positive und die LLM-Prüfung bis zu den geschätzt echten Handbüchern.}
+
+\section{Wie lange dauert ein Scraping-Lauf?}
+\Cref{fig:B04_laeufe_dauer} und \cref{tab:rechnung-realitaet} zeigen die Läufe. Der Großlauf im August dauerte \zDauerAug{}\,h für 65.944 PDFs (rund \zRateAug{} PDFs pro Stunde, im Spitzenbereich bis rund 11.900 pro Stunde), der Deep Run \zDauerDeep{}\,h für 132.193 PDFs (rund \zRateDeep{} PDFs pro Stunde, Spitze rund 14.400). Der Seeds-only-Lauf holte 431 PDFs von 134 Hosts in unter vier Minuten. Der Median pro Hochschule lag im August bei 285 Sekunden. Entscheidend ist, dass die Läufe von wenigen großen Hochschulen dominiert werden, die Mehrzahl der Hochschulen war in Minuten abgearbeitet.
+
+\abb[0.95]{htbp}{B04_laeufe_dauer}{Laufzeit, Dokumentenzahl und Durchsatz der drei Läufe.}
+\abb[0.85]{htbp}{18_durchsatz}{Durchsatz (neue PDFs pro Stunde) im Verlauf der beiden Großläufe.}
+
+\section{Wie viele Dokumente werden gefunden, und was geschieht mit ihnen?}
+\Cref{fig:02_endstatus_nach_quelle} zeigt den Endstatus aller \zDocsTotal{} Dokumente nach Lauf: LLM bestätigt (\zLLMConfirmed), TF-IDF $\ge$ 0,9 ungeprüft (\zTfidfHigh), Positive aus anderen Läufen ungeprüft (\zTfidfOther), LLM verworfen (\zLLMRejected), TF-IDF negativ ungeprüft (\zTfidfNegative) und ungeklärt wegen fehlendem Text oder Fehlern (\zUnresolved). Die beiden Großläufe überlappen: 33.883 URLs kamen in beiden vor; im Deep Run gilt dann der jüngere Datensatz. Der Deep Run erreichte 718 Hosts, die der August-Lauf nicht kannte, der August-Lauf 296 Hosts, die der Deep Run nicht erreichte (\cref{fig:20_laeufe_vergleich}).
+
+\abb[0.9]{htbp}{02_endstatus_nach_quelle}{Endstatus aller Dokumente nach Lauf.}
+\abb[0.85]{htbp}{20_laeufe_vergleich}{Vergleich von August-Lauf und Deep Run (URL-Überlappung).}
+
+\section{Wie groß sind die gespeicherten Datenmengen?}
+Der S3-Bucket enthält zum Auswertungszeitpunkt \zSpeicherObjekte{} Objekte mit zusammen \zSpeicherGB{}\,GB (\zSpeicherGiB{}\,GiB); davon entfallen rund 55\,GB auf den August-Lauf und rund 99\,GB auf den Deep Run, die Seeds-Läufe wiegen unter 1\,GB (\cref{fig:B05_datenmenge}). Da erzwungene Wiederholungsläufe dieselben PDFs unter neuer Job-ID ablegen, sind rund \zDupVolumePct\,\% des Volumens physische Duplikate; die URL-eindeutigen Dokumente belegen \zUniqueGB{}\,GB. Ein durchschnittliches PDF ist \zMeanMB{}\,MB groß, der Median liegt bei \zMedianMBAll{}\,MB; echte Modulhandbücher sind mit einem Median von \zMedianMBMH{}\,MB größer (typischerweise 100~KB bis 10~MB). Die gelisteten Modulhandbücher (erweiterte Liste) belegen zusammen rund \zMHVolumeGB{}\,GB, die streng bestätigten rund \zMHStrictVolumeGB{}\,GB. Die Manifeste (Metadaten, Scores) wiegen insgesamt nur rund 0,2\,GB.
+
+\abb[0.95]{htbp}{B05_datenmenge}{Gespeicherte Daten je Lauf und Dateigrößenverteilung der PDFs (logarithmische Achse).}
+
+\section{Wie viele Hochschulen und Studiengänge werden erfasst?}
+Von \zUnisTotal{} Hochschulen haben \zUnisStrict{} (\zUnisStrictPct\,\%) mindestens ein LLM-bestätigtes Handbuch; mit den ungeprüften Treffern oberhalb von 0,9 sind es \zUnisLikely{} (\zUnisLikelyPct\,\%). Bei \zUnisGeTen{} Hochschulen liegen mindestens zehn Handbücher vor, bei \zUnisNone{} Hochschulen wurde \emph{nichts} gefunden (kein Dokument, keine Seeds). Die Verteilung ist stark schief (\cref{fig:10_mh_pro_hochschule}): Der Median liegt bei \zMedianMH{} Handbüchern je Hochschule, die zehn ergiebigsten Hochschulen liefern \zTopTenShare\,\% aller Treffer. Ein Host allein (der Modulhandbuch-Server der Universität Augsburg) stellt über 1.800 Dokumente (\cref{fig:17_top_hosts}).
+
+\abb[0.85]{htbp}{10_mh_pro_hochschule}{Verteilung der Treffer pro Hochschule.}
+\abb[0.85]{htbp}{17_top_hosts}{Die 20 ergiebigsten Hosts.}
+
+\paragraph{Studiengänge.} Ein Modulhandbuch beschreibt in der Regel einen Studiengang (bzw.\ eine Prüfungsordnungsversion); die Zahl der Handbücher ist daher eine Näherung an die Zahl der erfassten Studiengänge, aber \emph{keine} exakte Zählung: Es gibt Sammelhandbücher für mehrere Studiengänge, mehrere Versionen desselben Studiengangs und Handbücher für Teilmodule. Eine saubere Zählung der Studiengänge wäre erst mit einer inhaltlichen Extraktion möglich (Ausblick, Kapitel~\ref{ch:fazit}).
+
+\section{Wie unterscheiden sich kleine und große, öffentliche und private Hochschulen?}
+Die Abdeckung hängt stark von Typ, Träger und Größe der Hochschule ab (\cref{fig:11_abdeckung_typ,fig:12_abdeckung_traeger,fig:13_abdeckung_groesse}):
+\begin{itemize}
+  \item \textbf{Typ:} Universitäten \zCovUni\,\%, Künstlerische Hochschulen \zCovKunst\,\%, Fachhochschulen/HAW \zCovFH\,\%, Verwaltungshochschulen \zCovVerw\,\%.
+  \item \textbf{Träger:} öffentlich-rechtlich \zCovOeff\,\%, kirchlich \zCovKirch\,\%, privat \zCovPriv\,\%.
+  \item \textbf{Größe:} Hochschulen unter 1.000 Studierenden liefern im Mittel nur rund \zMHProUniKlein{} Handbücher und ca.\ \zDocsProUniKlein{} heruntergeladene PDFs; Hochschulen mit 15.000--30.000 Studierenden im Mittel rund \zMHProUniGross{} Handbücher bei rund \zDocsProUniGross{} PDFs (\cref{fig:B07_klein_gross}).
+\end{itemize}
+Der Zusammenhang ist plausibel: Kleine private Hochschulen veröffentlichen Handbücher seltener oder in Login-Bereichen, haben kaum PDFs, nutzen JavaScript-Portale oder gar keine öffentlichen Handbücher. Große öffentliche Hochschulen haben oft Modul-Datenbanken mit tausenden Einzeldokumenten. Das heißt auch: Der Aufwand pro gefundenem Handbuch ist bei kleinen Hochschulen höher, der Nutzen je Crawl-Minute geringer. Grafik~\ref{fig:16_groesse_vs_ausbeute} zeigt die Streuung (Studierendenzahl gegen Treffer).
+
+\abb[0.8]{htbp}{11_abdeckung_typ}{Abdeckung nach Hochschultyp.}
+\abb[0.8]{htbp}{12_abdeckung_traeger}{Abdeckung nach Trägerschaft.}
+\abb[0.8]{htbp}{13_abdeckung_groesse}{Abdeckung nach Hochschulgröße (Studierendenzahl).}
+\abb[0.95]{htbp}{B07_klein_gross}{Mittlere Treffer, mittlere PDFs und Anteil ergiebiger Hochschulen nach Größenklasse.}
+\abb[0.8]{htbp}{16_groesse_vs_ausbeute}{Studierendenzahl gegen Treffer pro Hochschule.}
+\abb[0.8]{htbp}{14_abdeckung_bundesland}{Abdeckung nach Bundesland.}
+
+\section{Wie hoch ist die Erkennungs- und Klassifikationsquote?}
+Die Antwort hängt davon ab, was als Referenz gilt (vgl.\ Kapitel~\ref{ch:klassifikation}):
+\begin{itemize}
+  \item \textbf{Trainingsmetrik} (gruppierte Kreuzvalidierung): Precision \zTrainPrec\,\%, Recall rund 95\,\%.
+  \item \textbf{Realer Crawl, Score 0,5--0,9:} Precision rund \zMidPrec\,\% (Referenz LLM).
+  \item \textbf{Realer Crawl, Score $\ge$ 0,9:} Precision \zPilotPct\,\% (Pilot, $n=\zPilotN$).
+  \item \textbf{Endliste erweitert:} geschätzt rund \zEstTrue{} echte von \zFinalListed{} gelisteten Dokumenten, das entspricht einer Precision von rund 89\,\%; die streng bestätigte Liste ist per Definition vom LLM bestätigt; ihre tatsächliche Fehlerquote entspricht der Fehlerquote des LLM, die erst die manuelle Stichprobe messen kann (die Referenz ist das LLM, nicht ein Mensch).
+  \item \textbf{Recall:} unbekannt, nur grob abschätzbar: Gegenüber dem Erwartungswert von rund \zZielwert{} Handbüchern liegt die geschätzte Zahl echter Treffer bei rund 40--47\,\%. Aus den nicht LLM-geprüften Negativen mit Score 0,3--0,5 (18.252 Dokumente) lässt sich eine kleine Stichprobe von rund \zRecallMissed{} verpassten Handbüchern schätzen, \emph{sehr unsicher} (\cref{fig:21_recall_luecke}).
+\end{itemize}
+
+\abb[0.85]{htbp}{21_recall_luecke}{Was vorliegt und was fehlen könnte (grobe Schätzung).}
+
+\section{Wie viele Dokumente müssen manuell nachbearbeitet werden?}
+Ohne die LLM-Zweitstufe müssten alle Dokumente der Grauzone manuell geprüft werden. Mit ihr bleiben:
+\begin{itemize}
+  \item \zUnresolved{} Dokumente, bei denen weder TF-IDF noch OCR/LLM ein Urteil liefern konnten (kein Text, Fehler);
+  \item eine Stichprobe von 120 Dokumenten zur Messung der LLM-Genauigkeit (\texttt{stichprobe\_manuelle\_pruefung.csv}, vorbereitet, noch nicht ausgewertet \TODO{Stichprobe auswerten und Ergebnis ergänzen: Übereinstimmung Mensch--LLM});
+  \item die 159 verdächtigen Hosts mit rund 6.464 ungeprüften Positiven (LLM-Bestätigungsrate unter 30\,\% bei den übrigen Dokumenten dieser Hosts), deren LLM-Prüfung zum Zeitpunkt des Berichts läuft.
+\end{itemize}
+Bei einer Annahme von 30 Sekunden je Dokument ersparte die LLM-Zweitstufe rund \zManuellOhneH{} Stunden manueller Prüfung (\cref{fig:B09_manueller_aufwand}; Modellrechnung, keine Messung).
+
+\abb[0.8]{htbp}{B09_manueller_aufwand}{Manueller Prüfaufwand ohne und mit LLM-Zweitstufe (Modellrechnung, 30\,s je Dokument).}
+
+\section{Wie viele Duplikate gibt es?}
+In der erweiterten Liste sind \zDupLikely{} Einträge Duplikate (gleicher Host und gleicher Dateiname), in der strengen Liste \zDupStrict{} (\cref{fig:22_duplikate}). Eindeutig bleiben \zUniqueLikely{} (erweitert) bzw.\ \zUniqueStrict{} (streng) Dokumente. Die Duplikate entstehen, weil dieselbe Datei über mehrere Seiten verlinkt ist oder in mehreren Läufen vorkommt; auf Speicherebene kommen die physischen Duplikate erzwungener Läufe hinzu (siehe oben). Die Deduplikation per Host und Dateiname ist eine Näherung; zwei Hochschulen mit gleichnamigen Dateien auf getrennten Hosts bleiben richtig getrennt.
+
+\abb[0.8]{htbp}{22_duplikate}{Duplikate in der Endliste.}
+
+\section{Wie weit reichen die ältesten Dokumente zurück?}
+Das Erscheinungsjahr ist nur indirekt bestimmbar. Bei \zJahrAnzahl{} der gelisteten Dokumente steht eine Jahreszahl im Dateinamen. Sie reicht von \zJahrMin{} (nur \zJahrMinAnzahl{} Dokumente) bis 2027 (Handbücher für künftige Semester). Der Median ist \zJahrMedian, \zJahrAnteilNeu\,\% der Dokumente tragen ein Jahr ab 2020, \zJahreMitte{} die Jahre 2015 bis 2019 und \zJahreAlt{} ein Jahr vor 2015 (\cref{fig:19_jahre_im_dateinamen}). Der Crawl ist also zu den aktuellen Jahrgängen verzerrt, hat aber einen langen Schwanz älterer Versionen: Hochschulen lassen alte Handbuchversionen online. Diese Angabe ist ein Näherungswert: Eine Jahreszahl im Namen ist nicht notwendig das Veröffentlichungsjahr, und viele Dateien haben gar keine.
+
+\abb[0.85]{htbp}{19_jahre_im_dateinamen}{Jahreszahlen in den Dateinamen der gelisteten Dokumente.}
+
+\section{In welcher Tiefe der Webseiten liegen die Dokumente?}
+Die Klicktiefe wurde im Manifest nicht protokolliert. Als Näherung dient die \emph{Pfadtiefe der Fundseite} (Anzahl der URL-Segmente der Seite, die auf das Dokument verlinkt). Der häufigste Wert über alle PDFs ist \zTiefeModusAlle, bei den gelisteten Handbüchern \zTiefeModusMH; \zTiefeMHBisVier\,\% der Handbücher liegen auf Fundseiten mit Pfadtiefe bis~4, Handbücher liegen also im Mittel \emph{tiefer} als Durchschnitts-PDFs (\cref{fig:B06_tiefe}). Das stützt die Erfahrung aus Kapitel~\ref{ch:crawler}: Eine feste Tiefe von 2, wie sie der erste Crawl nutzte, verpasst den Großteil. \TODO{Für eine echte Klicktiefenstatistik die Tiefe im Manifest mitschreiben (Scrapy-Meta \texttt{depth}); für diesen Bericht Näherung belassen}
+
+\abb[0.85]{htbp}{B06_tiefe}{Pfadtiefe der Fundseiten (Näherung für die Klicktiefe) für alle PDFs und die gelisteten Modulhandbücher.}
+
+\section{Welche Datenmenge wäre bei einer deutschlandweiten Vollerhebung zu erwarten?}
+Die Hochschulliste umfasst \zUnisTotal{} Hochschulen und damit praktisch das gesamte Hochschulwesen; die \emph{Breite} der Erhebung ist also bereits deutschlandweit, die \emph{Tiefe} noch nicht. Für den Erwartungswert von rund \zZielwert{} Modulhandbüchern (Fachschätzung) liefert eine lineare Hochrechnung bei gleicher Ausbeute (\zPDFsProMH{} PDFs je echtem Modulhandbuch) rund \zPDFsHochrechnung{} zu sammelnde PDFs, rund \zGBHochrechnung{}\,GB Speicher und rund \zLLMDocsHochrechnung{} LLM-geprüfte Dokumente mit Kosten von etwa \zLLMKostenHochrechnung{}\,\$ (\cref{fig:B08_hochrechnung}). Die Rechenkosten des Crawls bleiben auch dann einstellig. Die Hochrechnung ist eine \emph{Untergrenze}: Die noch fehlenden Handbücher liegen auf den schwer erreichbaren Seiten (kleine, private, JavaScript, Login), die Ausbeute pro PDF wird dort schlechter sein. Wesentlich realistischer als mehr Crawl-Volumen ist daher ein anderer Weg zu den fehlenden Handbüchern (Discovery, Seitenebene, manuelle Nachsuche in der Liste der 39 leeren und der 117 Hochschulen ohne bestätigtes Handbuch).
+
+\abb[0.95]{htbp}{B08_hochrechnung}{Lineare Hochrechnung der Erhebung für \zZielwert{} Modulhandbücher (Ist: durchgezogen, Hochrechnung: schraffiert).}

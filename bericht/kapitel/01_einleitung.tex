@@ -1,0 +1,45 @@
+\chapter{Einleitung}\label{ch:einleitung}
+
+\section{Forschungskontext: KIWIT}
+Das vorliegende Projekt ist im Kontext der Forschungsgruppe KIWIT (\emph{Funktionen und Folgen Künstlicher Intelligenz in der Wissenschafts- und Hochschulorganisation}) entstanden, die seit April 2025 vom Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) gefördert wird. Die Beschreibung des Kontexts stammt vom Betreuer des Projekts:
+
+\begin{quote}\small
+„Das vorliegende Projekt ist im Kontext der Forschungsgruppe KIWIT (Funktionen und Folgen Künstlicher Intelligenz in der Wissenschafts- und Hochschulorganisation) entstanden, die seit April 2025 vom Bundesministerium für Forschung, Technologie und Raumfahrt (BMFTR) gefördert wird. KIWIT untersucht empirisch, wie Künstliche Intelligenz Strukturen und Prozesse in Wissenschaft und Hochschulorganisationen verändert --- auf der Ebene der Forschungspraxis, der institutionellen Steuerung sowie des Lehrens und Lernens.
+
+Innerhalb dieses Rahmens ist der entwickelte Crawler dem Forschungsprofil A (Makroebene) zugeordnet und dient der systematischen Erhebung öffentlich zugänglicher Hochschulinformationen. Universitätswebseiten sind eine zentrale primäre Datenquelle, um zu erfassen, wie Hochschulen KI-bezogene Strategien, Richtlinien und Angebote kommunizieren und formalisieren. Das modular aufgebaute Tool ermöglicht eine skalierbare, reproduzierbare Datenerhebung über eine Vielzahl von Institutionen hinweg und bildet damit eine methodische Grundlage für die quantitativen Analysevorhaben innerhalb von KIWIT.“
+\end{quote}
+
+Daraus ergibt sich eine Anforderung, die den gesamten Projektverlauf geprägt hat: Das System soll \emph{keine Einmallösung} für genau eine Dokumentart sein, sondern eine \emph{wiederverwendbare Erhebungsplattform}. Modulhandbücher dienen als erster, gut überprüfbarer Anwendungsfall. Sie eignen sich dafür, weil sie auf den Webseiten fast aller Hochschulen als PDF vorliegen, aber nirgends zentral verzeichnet sind, und weil sich ihre Echtheit vergleichsweise eindeutig beurteilen lässt.
+
+\section{Ausgangssituation und Motivation}
+An der FH Wedel werden regelmäßig neue Studienangebote konzipiert. Für eine fundierte Entscheidungsgrundlage ist der Vergleich mit Studiengängen anderer Hochschulen unerlässlich, da deren Modulhandbücher verlässlich Auskunft über Lehrinhalte, Umfänge und Prüfungsformen geben. Bislang mussten solche Dokumente manuell auf den Webseiten der Hochschulen gesucht und gesichtet werden. Das ist zeitaufwändig und fehleranfällig: In einer Aufwandsabschätzung zum MVP wurden 10 bis 15 Minuten je Hochschule veranschlagt, für einen Durchlauf über alle Hochschulen also 40 bis 60 Stunden, und das Ergebnis müsste in jedem Semester neu erhoben werden.
+
+Die Problemstellung ist dabei weniger das Herunterladen von Dokumenten, das Scrapy seit Jahren beherrscht, als das \emph{Finden} und \emph{Aussortieren}: Hochschulwebseiten sind sehr unterschiedlich aufgebaut, Handbücher liegen auf Fakultäts-Subdomains, in Modul-Datenbanken oder hinter skriptgenerierten Download-Links, und Prüfungsordnungen, Flyer oder Vorlesungsverzeichnisse sehen Modulhandbüchern täuschend ähnlich.
+
+\section{Problemstellung und Zielsetzung}
+Als User Story formuliert: \emph{Als Mitarbeiter der FH Wedel möchte ich einen Webscraper, der übergebene Links automatisiert nach Modulhandbüchern durchsucht, relevante von irrelevanten Dokumenten unterscheidet und die gefundenen Modulhandbücher strukturiert speichert, damit ich Lehrinhalte und -umfänge unterschiedlicher Hochschulen im Vergleich zu unseren Studienangeboten analysieren kann.}
+
+Daraus wurden zu Projektbeginn vier Akzeptanzkriterien abgeleitet:
+\begin{enumerate}[label=\textbf{A\arabic*}]
+  \item Der Scraper durchsucht alle übergebenen Links vollständig nach Dokumenten, die als Modulhandbuch identifizierbar sind.
+  \item Alle tatsächlichen Modulhandbücher werden gefunden --- keine relevanten Dokumente werden übersehen (Recall).
+  \item Dokumente, die keine Modulhandbücher sind, werden zuverlässig erkannt und nicht gespeichert (Precision).
+  \item Die identifizierten Modulhandbücher werden strukturiert und für die Weiterverarbeitung nutzbar abgelegt.
+\end{enumerate}
+
+Der Projektumfang hat sich im Verlauf deutlich verschoben. Der MVP im Juli arbeitete mit rund 6.400 PDFs von etwa 239 Hochschulen und einem Klassifikator, der auf 202 Dokumenten von 21 Hochschulen trainiert war. Ab August lautete das Ziel, \emph{möglichst alle} Modulhandbücher \emph{aller} \zUnisTotal{} Hochschulen der Hochschulliste zu erheben. Als grobe Fachschätzung für die Größenordnung diente ein Erwartungswert von etwa \zZielwert{} Modulhandbüchern. Dieser Wert ist keine Messung, sondern nur Referenz für die Recall-Einordnung.
+
+\section{Leitfragen und Kennzahlen}
+Neben der Funktion soll der Bericht den Daten- und Forschungsaspekt des Projekts greifbar machen. Dazu werden folgende Fragen mit Zahlen beantwortet (Kapitel~\ref{ch:ergebnisse}):
+\begin{itemize}
+  \item Wie lange dauert ein Scraping-Lauf, und wie viele Dokumente und Daten fallen dabei an?
+  \item Wie viele Hochschulen werden erfasst, und wie unterscheiden sich kleine und große, öffentliche und private Hochschulen?
+  \item Wie hoch ist die Erkennungs- bzw. Klassifikationsquote, und wie viele Dokumente müssen manuell nachbearbeitet werden?
+  \item Wie viele Duplikate treten auf, wie alt sind die ältesten Dokumente, und in welcher Tiefe der Webseiten liegen die meisten Funde?
+  \item Welche Datenmenge, Laufzeit und welche Kosten wären bei einer deutschlandweiten Vollerhebung zu erwarten?
+\end{itemize}
+
+\section{Vorgehen und Aufbau des Berichts}
+Der Bericht folgt dem tatsächlichen Projektverlauf und stellt \emph{den Weg} gleichberechtigt neben das Ergebnis. Kapitel~\ref{ch:verlauf} gibt den zeitlichen Überblick mit wochenweiser Aufschlüsselung der Aktivitäten. Kapitel~\ref{ch:grundlagen} fasst die eingesetzten Technologien zusammen. Kapitel~\ref{ch:architektur} zeigt die Architektur in drei Versionen, Kapitel~\ref{ch:aws} die Entwicklung der AWS-Umgebung einschließlich der Probleme (Sandbox-Verlust, Budget-Sperre). Kapitel~\ref{ch:crawler} und~\ref{ch:klassifikation} beschreiben Crawler und Klassifikation mit allen eingeschlagenen Wegen. Kapitel~\ref{ch:ergebnisse} stellt die Kennzahlen dar, Kapitel~\ref{ch:diskussion} diskutiert Sackgassen, Lehren und Grenzen. Kapitel~\ref{ch:sascha} ist dem Beitrag von Sascha Lauk vorbehalten, Kapitel~\ref{ch:fazit} schließt mit Fazit und Ausblick.
+
+\paragraph{Lesehinweis zu Farben in Diagrammen.} In den Architekturdiagrammen sind \emph{neu hinzugekommene} Komponenten blau hinterlegt, verworfene Ansätze orange gestrichelt. In den Ergebnisgrafiken gilt ein festes Schema: blau = LLM-bestätigt, grün = TF-IDF $\ge$ 0,9 (nicht LLM-geprüft), orange = verworfen, grau = negativ.

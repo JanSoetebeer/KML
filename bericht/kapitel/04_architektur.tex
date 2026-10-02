@@ -1,0 +1,93 @@
+\chapter{Architektur und ihre Entwicklung}\label{ch:architektur}
+
+Die Architektur ist nicht in einem Wurf entstanden, sondern in drei Generationen gewachsen, die jeweils auf ein konkretes Problem der vorherigen reagiert haben. Dieses Kapitel zeigt jede Version als Diagramm (neue Komponenten blau, verworfene orange) und begründet die Übergänge. Die zugehörigen AWS-Details (Dienste, IAM, Kosten, Betriebsprobleme) stehen in Kapitel~\ref{ch:aws}.
+
+\section{Leitprinzipien}
+Über alle Versionen hinweg gelten vier Prinzipien:
+\begin{enumerate}
+  \item \textbf{Steuerung und Last trennen.} Das „Cockpit“ (Webapp auf EC2) ist klein, läuft dauerhaft und skaliert nicht mit der Datenmenge. Die Arbeit läuft nur bei Bedarf in kurzlebigen Containern.
+  \item \textbf{Ein Image, mehrere Laufzeiten.} Derselbe Container-Code läuft in Lambda, Fargate und lokal; der Einstiegspunkt (Lambda-Handler bzw. \texttt{bulk\_run.py}) unterscheidet sich.
+  \item \textbf{Generische Engine, austauschbare Profile.} Die Crawl-Engine kennt keine Modulhandbücher; sie delegiert vier Entscheidungen (Linkbewertung, Zieldefinition, Extraktion aus Binärdateien, Extraktion aus Seiten) an ein \emph{Extraktionsprofil}. Ein neuer Anwendungsfall ist ein neues Profil plus ein Registry-Eintrag.
+  \item \textbf{Zustand extern halten.} Dokumente, Manifeste, Feedback, Seeds und Visited-Store liegen in S3 bzw. DynamoDB, nicht im Container.
+\end{enumerate}
+
+\section{Architektur v1: Lambda plus Webapp (Juni bis Anfang Juli)}\label{sec:arch-v1}
+Die erste Version ist ein klassischer Serverless-Ansatz (\cref{fig:archA}). Die Webapp auf einer EC2-Instanz (FastAPI, SQLite, Caddy für HTTPS) nimmt eine URL oder eine CSV-Liste entgegen und ruft pro Anfrage eine Lambda-Funktion synchron auf. Die Funktion startet den \texttt{JobRunner}, der pro URL einen Scrapy-Spider betreibt (Tiefe 2, höchstens 60 Seiten), die Dateien über die Pipelines nach S3 schreibt und die besuchte URL im DynamoDB-Visited-Store vermerkt.
+
+\begin{sidewaysfigure}\centering
+  \resizebox{0.95\linewidth}{!}{\archA}
+  \caption{Architektur v1 (Juni bis 3.\,Juli): Webapp auf EC2 ruft Lambda synchron auf; S3 und DynamoDB halten den Zustand.}\label{fig:archA}
+\end{sidewaysfigure}
+
+\paragraph{Begründung.} Die Last ist selten, stoßweise und perfekt parallelisierbar: 424 Hochschulen haben nichts miteinander zu tun. Lambda skaliert auf null und kostet ohne Last nichts. Rechnerisch ergaben sich für einen Vollauf 424 parallele Invocations (innerhalb des Limits von 1.000), ein Rechenaufwand von rund 76.000 GB-Sekunden und damit etwa 1,30~USD. Im MVP-Vortrag wurde ein Vollauf auf rund zehn Minuten veranschlagt; diese Zahl war \emph{gerechnet, nicht gemessen} (zur späteren Realität siehe Abschnitt~\ref{sec:aws-lambda-fargate}).
+
+\paragraph{Grenzen.} Drei harte Lambda-Eigenschaften erwiesen sich als Problem: das Zeitlimit von 15 Minuten (Tiefe/Seitenzahl mussten klein bleiben, sonst Timeout), das Puffern jeder Datei im Arbeitsspeicher und die Tatsache, dass alle URLs eines Aufrufs sich ein Budget teilen. Die synchrone Antwort der Webapp lief bei längeren Läufen zudem zuverlässig in den HTTP-Timeout; deshalb wurde das Polling-Muster (POST liefert eine \texttt{job\_id}, GET fragt den Status) eingeführt.
+
+\section{Architektur v2: Klassifikation, Feedback, CI/CD und Fargate (Juli)}\label{sec:arch-v2}
+Die zweite Version (\cref{fig:archB}) fügt vier Dinge hinzu:
+\begin{enumerate}
+  \item \textbf{Klassifikation im Crawl.} Eine \texttt{ClassificationPipeline} bewertet jedes heruntergeladene PDF im Speicher mit dem TF-IDF-Modell, annotiert das Item und schreibt ein Manifest (eine JSONL-Zeile je Dokument mit Score und Entscheidung) nach S3. Das Modell ist in das Container-Image eingebettet; Training und Betrieb nutzen dasselbe Paket (\texttt{mlclassifier}), ein Train/Serve-Skew ist damit ausgeschlossen.
+  \item \textbf{Human-in-the-Loop.} Die Review-UI zeigt Positive und Zweifelsfälle; Verdikte („Modulhandbuch“/„Kein Modulhandbuch“) werden gebündelt nach \texttt{s3://…/feedback/} geschrieben. Ein lokales Kommando (\texttt{feedback-retrain}) zieht die Verdikte, holt die Dokumente und trainiert nach.
+  \item \textbf{CI/CD.} Ein Push auf \texttt{main} baut das Image und aktualisiert Lambda (GitHub Actions, OIDC statt statischer Schlüssel) und rollt die Webapp über SSM Run Command aus, ohne dass ein SSH-Port geöffnet wird.
+  \item \textbf{Fargate-Bulk-Pfad.} Die Webapp routet nach URL-Anzahl: bis \texttt{BULK\_URL\_THRESHOLD} (zunächst 10) an Lambda, darüber an einen ECS-Fargate-Task mit demselben Image und dem Einstiegspunkt \texttt{bulk\_run.py}. Der Task hat kein Zeitlimit, mehr Speicher und liest die URL-Liste aus S3.
+\end{enumerate}
+
+\begin{sidewaysfigure}\centering
+  \resizebox{0.95\linewidth}{!}{\archB}
+  \caption{Architektur v2 (11.--24.\,Juli): Klassifikation im Container-Image, Feedback-Schleife, CI/CD und Fargate-Bulk-Pfad mit Routing nach URL-Anzahl.}\label{fig:archB}
+\end{sidewaysfigure}
+
+Im selben Zeitraum wurde die Crawl-Engine modularisiert (Best-First-Frontier, Sitemap-Seeding, Subdomain-Erkennung, Extraktionsprofile; Kapitel~\ref{ch:crawler}) und das Terraform-Projekt angelegt, das später verworfen wurde (Abschnitt~\ref{sec:aws-iac}).
+
+\section{Architektur v3: Discovery, OCR und LLM-Zweitstufe (August bis Oktober)}\label{sec:arch-v3}
+Die Auswertung des ersten Großlaufs (Kapitel~\ref{ch:crawler}) zeigte, dass \emph{Finden} das Hauptproblem ist, später, dass \emph{Aussortieren} es ist. Die dritte Version (\cref{fig:archC}) antwortet auf beides:
+\begin{itemize}
+  \item \textbf{Discovery-Modul.} Common Crawl und Serper liefern vorab URL-Kandidaten (\emph{Seeds}) pro Hochschule; sie liegen in S3 und werden vom Fargate-Task als priorisierte Ziele geladen. Der \emph{Seeds-only-Modus} holt ausschließlich diese Seeds und überspringt den Visited-Store, sodass nur Lücken-Hochschulen ohne Duplikate nachgearbeitet werden. Für Seeds lässt sich robots.txt gezielt umgehen (Abschnitt~\ref{sec:crawler-robots}).
+  \item \textbf{Crawl-Verbesserungen.} Breadth-Fairness (Seitenkappe je Fakultäts-Sektion), größere Tiefe und Seitenzahl sowie ein Laufzeit-Wachhund, der den Task hart beendet.
+  \item \textbf{Nachbereitung auf dem Laptop.} OCR (Tesseract) für gescannte PDFs, LLM-Review über Amazon Bedrock und die Auswertungsskripte arbeiten direkt auf S3-Daten.
+  \item \textbf{Bootstrap-Skript.} Ein idempotentes PowerShell-Skript baut die gesamte AWS-Umgebung neu auf und ersetzt Terraform; es entstand als Reaktion auf den Sandbox-Verlust (Kapitel~\ref{ch:aws}).
+  \item \textbf{Verworfene Quellen} (orange): Google Custom Search und DuckDuckGo (Abschnitt~\ref{sec:crawler-discovery}).
+\end{itemize}
+
+\begin{sidewaysfigure}\centering
+  \resizebox{0.95\linewidth}{!}{\archC}
+  \caption{Architektur v3 (August bis Oktober): Discovery-Seeds, Seeds-only-Modus, Fargate-Crawl mit Wachhund, OCR und LLM-Review auf S3-Daten sowie Bootstrap-Skript.}\label{fig:archC}
+\end{sidewaysfigure}
+
+\section{Vergleich der Versionen}
+\Cref{tab:arch-vergleich} stellt die drei Versionen gegenüber. Auffällig ist, wie sich der Engpass verschoben hat: von der \emph{Plattform} (läuft es in der Cloud?) über die \emph{Laufzeit} (reicht Lambda?) und den \emph{Recall} (wird alles gefunden?) hin zur \emph{Precision} (ist es wirklich ein Modulhandbuch?).
+
+\begin{table}[htbp]
+\centering\small
+\caption{Die drei Architekturversionen im Vergleich.}\label{tab:arch-vergleich}
+\begin{tabularx}{\linewidth}{@{}p{2.6cm} X X X@{}}
+\toprule
+ & \textbf{v1 (Juni--Juli)} & \textbf{v2 (Juli)} & \textbf{v3 (August--Oktober)} \\
+\midrule
+Rechnen & Lambda (synchron) & Lambda + Fargate, Routing nach URL-Anzahl & Fargate-Bulk, Seeds-only; Nachbereitung lokal \\
+Crawl & Tiefe 2, 60 Seiten, ungesteuert & Best-First, Sitemap, Subdomains, Profile & Seeds, Sektions-Cap, Tiefe 5, 2.500 Seiten \\
+Klassifikation & -- & TF-IDF im Image, Review-Band & + LLM-Zweitstufe, OCR \\
+Qualitätsschleife & -- & Human-in-the-Loop, Nachtraining & LLM-Labels, Pilotstichprobe \\
+Deployment & manuell, Terraform-Entwurf & GitHub Actions (OIDC, SSM) & + Bootstrap-Skript für Neuaufbau \\
+Haupt\-problem danach & 15 min, Speicher, wenig Funde & Recall (nur 261 von 404 Hochschulen) & Precision, Kosten, Betrieb \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Datenfluss pro Dokument}
+Unabhängig von der Version durchläuft jedes Dokument dieselbe Kette (\cref{fig:datenfluss}): Download, Textextraktion, Bewertung durch das TF-IDF-Modell und je nach Score entweder direkte Übernahme, LLM-Prüfung oder Verwurf. Scans ohne Textebene gehen zunächst in die OCR und anschließend in dieselbe LLM-Prüfung. Die Zahlen sind die der Abschlussauswertung.
+
+\begin{figure}[htbp]\centering
+  \resizebox{\linewidth}{!}{\datenfluss}
+  \caption{Datenfluss pro Dokument mit den Mengen der Abschlussauswertung (Endliste = LLM-bestätigt + TF-IDF $\ge$ 0,9 ungeprüft).}\label{fig:datenfluss}
+\end{figure}
+
+\section{Modularität und Wiederverwendbarkeit}
+Die Forderung des Projektkontexts (Kapitel~\ref{ch:einleitung}), eine Plattform statt einer Einzellösung zu liefern, wurde an vier Stellen umgesetzt:
+\begin{itemize}
+  \item \textbf{Extraktionsprofile} (\texttt{profiles/}): \texttt{modulhandbuch} (Schlüsselwort-gewichtet, Referenzprofil), \texttt{html\_content} (Vorlage für HTML-Inhalte und strukturierte Felder). Der Engine-Code bleibt unverändert.
+  \item \textbf{Spezifikationsgesteuerter LLM-Review} (\texttt{specs.py}): Eine \texttt{ClassificationSpec} (Definition, Beispiele, Ausschlüsse) beschreibt, was gesucht wird; das Urteilsfeld ist generisch (\texttt{is\_match}).
+  \item \textbf{Profilgetriebene Discovery:} Suchbegriffe und URL-Stämme stammen aus dem Profil; ein neuer Dokumenttyp braucht nur ein anderes Profil.
+  \item \textbf{Rollen-Modell-Matrix} der Webapp: neue Rolle plus neues Modell ergibt einen neuen Anwendungsfall ohne Frontend-Änderung.
+\end{itemize}
+Das ist die technische Brücke zu KIWIT: Sollen künftig statt Modulhandbüchern etwa KI-Strategiepapiere oder -Richtlinien erhoben werden, sind ein neues Profil, eine neue Spezifikation und ein neu trainiertes Modell nötig, nicht aber ein neuer Crawler.

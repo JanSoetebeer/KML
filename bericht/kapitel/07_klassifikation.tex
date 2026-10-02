@@ -1,0 +1,99 @@
+\chapter{Klassifikation: vom TF-IDF-Modell zur LLM-Zweitstufe}\label{ch:klassifikation}
+
+Dieses Kapitel ist der Kern des Machine-Learning-Anteils. Es zeigt, wie ein auf dem Papier sehr gutes Modell im realen Crawl deutlich schlechter abschnitt, wie das erkannt wurde und welche Maßnahmen die Qualität schließlich auf ein belastbares Niveau gebracht haben.
+
+\section{Aufgabe und Daten}
+Die Aufgabe ist binär: \emph{Ist dieses PDF ein Modulhandbuch?} Als Modulhandbuch zählt (Definition im Prompt der Zweitstufe) ein systematisches Handbuch, das die Module eines Studiengangs beschreibt. Einzelne Modulblätter, Prüfungsordnungen, Studienverlaufspläne und Vorlesungsverzeichnisse zählen \emph{nicht}. Diese strenge Definition ist eine Entscheidung; sie ist der Hauptgrund für viele Beinahe-Treffer.
+
+Die Trainingsdaten (\texttt{modulhandbuecher/\{positiv,negativ\}/<hochschule>/}) wuchsen in drei Stufen (\cref{tab:modelle}):
+\begin{itemize}
+  \item \textbf{MVP-Modell (Juli):} 202 Dokumente (134 positiv, 68 negativ) aus 21 Hochschulen nach Deduplizierung per normalisiertem Text-Hash vor dem Split.
+  \item \textbf{Nach Feedback (22.\,Juli):} Die Review-UI lieferte 157 Verdikte (9 positiv, 148 negativ), das nachtrainierte Modell nutzte 356 Dokumente aus 22 Hochschulen (143 positiv, 213 negativ). Die Verdikte waren vor allem harte Negative, das heißt Dokumente, die dem Modell zuvor als Handbuch erschienen.
+  \item \textbf{Nach der Massenerhebung (3.\,September):} Mit über 5.000 zusätzlichen Handbüchern aus dem Crawl wuchs der Datensatz auf \textbf{2.695 Dokumente} aus \textbf{269 Hochschulen} (1.971 positiv, 724 negativ).
+\end{itemize}
+
+\section{Modell und Evaluation}
+Das Modell ist eine logistische Regression auf TF-IDF-Merkmalen (Wort- und Zeichen-n-Gramme) des extrahierten PDF-Texts. Die Evaluation nutzt \emph{StratifiedGroupKFold, gruppiert nach Hochschule}: Keine Hochschule steht gleichzeitig im Training und im Test, es wird also die Erkennung an \emph{ungesehenen} Hochschulen gemessen (Szenario~B). Ein Leakage-Check trainiert zwei Varianten, \emph{nur Inhalt} und \emph{Inhalt plus Dateiname/Metadaten}; sind sie ähnlich gut, liest das Modell das Dokument und nicht den Dateinamen. Die Schwellen werden auf 95\,\% Recall kalibriert (Kapitel~\ref{ch:grundlagen}).
+
+\begin{table}[htbp]
+\centering\small
+\caption{Modellversionen und gruppierte Kreuzvalidierung.}\label{tab:modelle}
+\begin{tabular}{@{}l r r r r r r@{}}
+\toprule
+\textbf{Version} & \textbf{Dok.} & \textbf{Hochsch.} & \textbf{PR-AUC} & \textbf{ROC-AUC} & \textbf{Prec.} & \textbf{Recall} \\
+\midrule
+MVP (Juli), Variante \emph{content} & 202 & 21 & 0,957 & 0,941 & 0,871 & 0,955 \\
+MVP, \emph{content + Dateiname} & 202 & 21 & 0,960 & 0,926 & 0,848 & 0,955 \\
+Stand September, \emph{content} & 2.695 & 269 & 0,988 & 0,973 & 0,965 & 0,950 \\
+September, \emph{content + Metadaten} & 2.695 & 269 & 0,976 & 0,959 & 0,958 & 0,950 \\
+\bottomrule
+\end{tabular}
+\par\smallskip\footnotesize Precision und Recall am Schwellenwert für das Recall-Ziel von 95\,\% (MVP: 0,387; September: 0,627). Beim Schwellenwert 0,5 erreicht die September-Variante \emph{content} Precision 0,952 und Recall 0,985.
+\end{table}
+
+Die Leakage-Prüfung bestätigte das Modell: Inhalt und Inhalt-plus-Metadaten liegen nahe beieinander (MVP 0,957 gegenüber 0,960; September sogar leicht schlechter mit Metadaten), also wird das schlankere Inhaltsmodell ausgeliefert. Die Konfusionsmatrix der September-Variante am Recall-Ziel: 1.873 richtig positive, 98 falsch negative, 656 richtig negative, 68 falsch positive. Anhang~\ref{app:metriken} enthält die Details.
+
+\section{Der Praxis-Gap: 96,5\,\% im Training, 25\,\% im Crawl}
+Die Trainingsmetriken waren hervorragend, doch im realen Crawl verhielt sich das Modell anders. Zwei Beobachtungen kamen aus dem Betrieb:
+\begin{enumerate}
+  \item NORDAKADEMIE lieferte neun „Handbücher“, obwohl dort keine online sind.
+  \item Die LLM-Verifikation der 226 automatisch positiven Treffer aus dem Seeds-Lauf (215 prüfbar) ergab nur \textbf{129 echte Handbücher} und 86 Fehlalarme (rund 40\,\%): Studienordnungen, Verkündungsblätter, ein Bewerbungsformular mit Score 0,79, Lehrbücher.
+\end{enumerate}
+Die systematische Auswertung nach Score-Bereichen (\cref{fig:03_precision_je_score}) zeigt, wie stark der Score überschätzt: Bei Score 0,5--0,6 bestätigt das LLM nur 8\,\% der Treffer, bei 0,8--0,9 sind es 44\,\%; erst oberhalb von 0,9 liegt die Bestätigungsrate bei \zPilotPct{}\,\% (Pilotstichprobe, $n=\zPilotN{}$, Wilson-Intervall \zPilotLo{}--\zPilotHi{}\,\%).
+
+\abb[0.8]{htbp}{03_precision_je_score}{Anteil der vom LLM bestätigten TF-IDF-Positive je Score-Bereich (LLM als Referenz). Die Bereiche oberhalb 0,9 stammen aus der Pilotstichprobe.}
+\abb[0.8]{htbp}{23_training_vs_praxis}{Precision im Training (gruppierte Kreuzvalidierung) gegenüber dem realen Crawl. Die Differenz ist die Kernaussage zur Übertragbarkeit.}
+
+\paragraph{Ursachen.} (1)~Das Trainingsset bildet die Breite der Beinahe-Treffer im Web nicht ab: Die Negativbeispiele waren überwiegend leichte Fälle, während der Crawl Zehntausende Prüfungsordnungen, Modulblätter und Studienverlaufspläne enthält. (2)~Die Schwelle wurde im Deep Run auf 0,5 gesenkt, um Recall zu gewinnen, das aktuelle Modell schlägt 0,8 vor; das erzeugte die Positiv-Flut (37.993 Positive allein im Deep Run). (3)~Die Verteilung unterscheidet sich zwischen Hochschulen mit Handbuch-Datenbank (viele ähnliche Dokumente je Host) und den Trainingshochschulen.
+
+\paragraph{Welche Dokumente werden verwechselt?} Die LLM-Begründungen der \zFPTotal{} verworfenen TF-IDF-Positive wurden per Stichwort in Fehlerarten eingeteilt (\cref{fig:07_fehlerarten}): knapp die Hälfte sind Prüfungs- oder Studienordnungen (48\,\%), 19\,\% einzelne Modulblätter oder Syllabi, 12\,\% Studienverlaufspläne, 5\,\% unvollständige Modulkataloge, 4\,\% Veranstaltungsverzeichnisse und 2\,\% Formulare. Das sind genau die Dokumenttypen, die dem Modulhandbuch semantisch am nächsten liegen. Die Zuordnung ist stichwortbasiert und daher grob.
+
+\abb[0.85]{htbp}{07_fehlerarten}{Fehlerarten der TF-IDF-Positive, die das LLM verworfen hat.}
+
+\paragraph{Dateiname als Signal.} Obwohl das Modell nicht auf Dateinamen trainiert wurde, ist der Dateiname ein starkes Zusatzsignal (\cref{fig:08_dateiname_signal}): Enthält er „modul“, „handbuch“ oder „mhb“, werden bei Score $\ge$ 0,9 90\,\% bestätigt, ohne diese Stichwörter nur 41\,\%; im Bereich 0,5--0,7 sind es 36\,\% gegenüber 8\,\%. Das ist ein Ansatzpunkt für ein künftiges Modell (Kapitel~\ref{ch:fazit}).
+
+\abb[0.85]{htbp}{08_dateiname_signal}{Bestätigungsrate des LLM mit und ohne Handbuch-Stichwort im Dateinamen.}
+
+\section{Human-in-the-Loop}
+Die erste Antwort auf Modellfehler war ein \emph{Menschen-Review}. Die Review-UI der Webapp zeigt relevante Dokumente (Positive und Review-Band) nach Score sortiert, mit Seitenweise-Anzeige für große Mengen und Download. Verdikte werden gesammelt (nicht einzeln) an S3 geschrieben, über das Kommando \texttt{feedback-retrain --from-s3} geholt, die Dokumente unter dem \emph{menschlichen} Label in den Trainingsbaum einsortiert (nach Hochschule gruppiert) und das Modell neu trainiert; das neue Modell wird per Git eingecheckt und über CI/CD ausgeliefert. Der Mechanismus ist modellunabhängig (positiv/negativ), nicht modulhandbuchspezifisch. In der Praxis stieß der manuelle Weg an die Skala: Bei zehntausenden Kandidaten ist menschliches Prüfen nicht tragfähig; das war der Anlass für die LLM-Zweitstufe.
+
+\section{LLM-Zweitstufe}\label{sec:llm}
+\paragraph{Aufbau.} Die Zweitstufe (\texttt{mlclassifier/llm\_review.py}) liest die Manifest-Einträge eines Bandes (Review, automatisch positiv oder ein Score-Fenster), lädt die PDFs aus S3, extrahiert Text, sendet Textauszüge an Claude Haiku~4.5 auf Amazon Bedrock und erhält ein strukturiertes Urteil mit Begründung und Konfidenz zurück. Der Prompt wird aus einer \texttt{ClassificationSpec} gebaut (Definition, Beispiele, Ausschlüsse), die Zweitstufe ist also wiederverwendbar. Ein Urteil gilt nur bei Konfidenz $\ge$ 0,8 als bestätigt (praktisch liegen alle Urteile zwischen 0,8 und 1,0). Die Verarbeitung läuft parallel (Thread-Pool, standardmäßig 12 Arbeiter, mit Sperre für Manifestschreiben und fehlerisolierten Einzelaufrufen); das senkte die Dauer für rund 6.000--8.000 Dokumente von etwa fünf Stunden auf etwa 30 Minuten. Das Modell wurde bewusst klein gewählt (Haiku): billig genug für zehntausende Dokumente, im Test aber hinreichend genau (6 von 6 Zweifelsfällen aus htwsaar mit Konfidenz 0,95 korrekt als Handbuch erkannt).
+
+\paragraph{Läufe.} \Cref{tab:llm-laeufe} listet die Läufe.
+
+\begin{table}[htbp]
+\centering\small
+\caption{LLM-Läufe der Zweitstufe.}\label{tab:llm-laeufe}
+\begin{tabular}{@{}l r r r@{}}
+\toprule
+\textbf{Lauf} & \textbf{geprüft} & \textbf{bestätigt} & \textbf{Rate} \\
+\midrule
+Review-Band des Aug-Laufs (Score 0,3--0,7) & 6.065 & 1.845 & 30\,\% \\
+Positive 0,5--0,9 des Deep Runs & 20.966 & 5.153 & 25\,\% \\
+Pilot: Stichprobe der Positive $\ge$ 0,9 & 400 & 330 & 82,5\,\% \\
+OCR-Treffer (Score $\ge$ 0,5) & 247 & 42 & 17\,\% \\
+\midrule
+\textbf{Summe (je URL eindeutig)} & \textbf{\zLLMReviewed{}} & \textbf{\zLLMConfirmed{}} & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Die Pilotstichprobe.} Um nicht auch die 13.741 Dokumente oberhalb von 0,9 mit dem LLM prüfen zu müssen (rund 35\,\$), wurde eine Zufallsstichprobe von 400 geprüft. 330 wurden bestätigt (\zPilotPct{}\,\%, Wilson-Intervall \zPilotLo{}--\zPilotHi{}\,\%). Daraus folgt eine \emph{Schätzung} von rund \zEstTrue{} echten Modulhandbüchern in der erweiterten Liste (Bereich \zEstTrueLow{}--\zEstTrueHigh{}). Die Annahme ist, dass die Stichprobe für die gesamte Gruppe repräsentativ ist; das ist nicht für alle Hosts erfüllt (siehe Abschnitt~\ref{sec:grenzen}).
+
+\abb[0.9]{htbp}{05_llm_laeufe}{LLM-Läufe: Umfang und Bestätigungsrate.}
+
+\paragraph{Ein Fehler in der Auswertung.} Ein Fehler in der Evaluation (\texttt{rescore\_decisions}) überschrieb jedes LLM-Urteil beim Neubewerten mit der Score-Schwelle: Ein vom LLM abgelehnter Fehlalarm kippte zurück auf „positiv“, sobald sein Score $\ge$ 0,5 war. Damit waren \emph{alle} bisherigen LLM-Ergebnisse in der Auswertung stillschweigend wirkungslos. Der Fix: Datensätze mit \texttt{llm\_reviewed=True} werden nie neu bewertet, das LLM-Urteil ist Wahrheit. Wirkung: positive Dokumente 14.133 $\to$ 13.565, Review 5.852 $\to$ 2.122, Abdeckung 314 $\to$ 303. Die \emph{ehrliche} Zahl war also kleiner als die zuvor berichtete.
+
+\section{OCR für gescannte PDFs}
+Rund 3.600 PDFs lieferten keinen Text (\texttt{empty\_document}), landeten im Review-Band und sollten nie stillschweigend im Negativ verschwinden. Ein OCR-Fallback (PyMuPDF rastert, Tesseract mit \texttt{deu+eng}) wurde gebaut und lokal auf \zOCRDone{} Scans angewendet: \zOCRText{} lieferten Text, nur \zOCRLLM{} erreichten einen Score $\ge$ 0,5 und gingen ans LLM, \zOCRConf{} wurden bestätigt (\cref{fig:09_ocr_trichter}). Der Ertrag (rund 1\,\% der Ausgangsmenge) steht in keinem Verhältnis zum Aufwand (lokale Tesseract-Installation, mehrere parallel laufende Prozesse über viele Stunden); ein klassisches Beispiel für einen Ansatz, der gebaut wurde, weil er plausibel war, und dessen Grenznutzen erst die Messung zeigte.
+
+\abb[0.8]{htbp}{09_ocr_trichter}{OCR-Trichter: von den Scans ohne Textebene bis zu den bestätigten Handbüchern.}
+
+\section{Erwogene Alternativen}
+\begin{itemize}
+  \item \textbf{Regex auf „Modulhandbuch“ im Dateinamen/Text:} scheitert in beide Richtungen (Handbücher ohne das Stichwort im Namen, Verordnungen und Formulare, die „Modulhandbuch“ erwähnen).
+  \item \textbf{Transformer-Finetuning (z.\,B.\ BERT):} bei 202 bzw.\ 356 Dokumenten ungeeignet; bei 2.695 Dokumenten denkbar, aber die LLM-Zweitstufe liefert dasselbe ohne Training.
+  \item \textbf{LLM für alle Dokumente:} bei 164.396 PDFs und rund 2.300 Eingabetoken je Dokument wären das gut 375 Millionen Token; mit dem TF-IDF-Filter genügen rund 27.700 Dokumente. Die zweistufige Architektur spart gut 80\,\% der LLM-Aufrufe.
+  \item \textbf{Rein manuelles Prüfen:} Bei 30\,s je Dokument wären das rund \zManuellOhneH{}\,Stunden für die LLM-geprüften Dokumente allein (\cref{fig:B09_manueller_aufwand}).
+\end{itemize}

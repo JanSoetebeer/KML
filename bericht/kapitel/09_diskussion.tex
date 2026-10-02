@@ -1,0 +1,58 @@
+\chapter{Diskussion: Sackgassen, Lehren und Grenzen}\label{ch:diskussion}
+
+Das Projekt hat mehr Wege verworfen, als es am Ende beschritten hat. Dieses Kapitel sammelt sie bewusst an einer Stelle, ordnet sie ein und zieht Schlüsse. Es folgt eine ehrliche Bewertung der Aussagekraft der Ergebnisse.
+
+\section{Wege, die nicht (oder nur teilweise) funktioniert haben}
+\Cref{tab:sackgassen} listet die Sackgassen und teilweisen Fehlschläge in der Reihenfolge ihres Auftretens. Der \emph{Nutzen} der Sackgassen liegt in dem, was sie gezeigt haben: oft die Ursache des eigentlichen Problems.
+
+\begin{table}[htbp]
+\centering\small
+\caption{Verworfene oder gescheiterte Wege und ihre Lehre.}\label{tab:sackgassen}
+\begin{tabularx}{\linewidth}{@{}p{0.5cm} p{3.4cm} p{3.6cm} X@{}}
+\toprule
+\textbf{Nr.} & \textbf{Weg} & \textbf{Befund} & \textbf{Lehre / Ersatz} \\
+\midrule
+1 & Lambda für alle Läufe, Tiefe/Seiten hochdrehen & 15-min-Limit, RAM-Pufferung; Timeouts bei Tiefe $\ge$ 2 mit vielen Seiten & Fargate-Bulk-Pfad; Lambda nur noch interaktiv \\
+2 & Synchrone Webapp-Antwort & HTTP-Timeout bei längeren Läufen; Endlosschleife bei Mehrfach-Formaten & Asynchrone Jobs mit Polling; Visited-Store; harte Obergrenzen \\
+3 & Terraform als Infrastruktur-Wahrheit & Zustand und Handanlagen liefen auseinander; Werkzeuge im Dev-Setup nicht nutzbar & AWS-CLI + JSON-Vorlagen, später Bootstrap-Skript \\
+4 & Ungesteuerter Tiefen-Crawl & TU Dortmund: 4 echte von 934 Dokumenten & Best-First, Sitemap, Subdomain-Erkennung \\
+5 & Sitemaps als Quelle für tiefe Dateien & Konstanz hat keine Sitemap; tiefe Dateien stehen nirgends & Suchindizes (Common Crawl, Serper) \\
+6 & Google Custom Search & Web-weite Suche entfernt (50-Domain-Grenze) & Serper (SERP-API) \\
+7 & DuckDuckGo-Scraping & CAPTCHA aus der Cloud & verworfen \\
+8 & Firecrawl-Rendering (JS) & Für IU keine PDFs; Pipeline gebaut, nicht im Großlauf getestet & offen; Playwright-basiertes Rendering als Ausblick \\
+9 & Schwelle 0,5 für maximalen Recall & Positiv-Flut, Precision 25--60\,\% in der Praxis & LLM-Zweitstufe; Schwelle 0,8--0,9 empfohlen \\
+10 & OCR für alle Scans & 3.553 Scans, nur 42 bestätigte Handbücher (rund 1\,\%) & Aufwand/Ertrag schlecht; nur für Review-Band sinnvoll \\
+11 & Re-Scoring in der Evaluation überschrieb LLM-Urteile & Falsche, zu optimistische Abdeckung (314 statt 303) & LLM-Urteil hat Vorrang; Test-Disziplin \\
+12 & DynamoDB-Dedup auf Hochschulebene bei Discovery-Wiederholung & Discovery lief nie für bereits gecrawlte Hochschulen & Seeds-only-Modus \\
+13 & Mantle-Endpunkt von Bedrock & per SCP verboten (403) & nativer Bedrock-Client \\
+14 & Langlebiger Bedrock-Schlüssel & vom Account nicht erlaubt; Schlüssel verfallen nach 30\,min bis 12\,h & Chunk-Verarbeitung, wiederaufnehmbar \\
+15 & Serper bezahlt / \texttt{filetype:} & Free-Tier erlaubt weder \texttt{filetype:} noch mehr als 10 Treffer & Free-Tier-Anpassung; Recall begrenzt \\
+16 & SQS-Fan-out für Breite & Roadmap-Punkt, nie gebaut & durch Fargate ersetzt \\
+17 & Menschen-Review als Hauptmittel der Qualitätssicherung & Skala (zehntausende Kandidaten) & LLM-Zweitstufe, Mensch nur für Stichprobe \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+\section{Lehren}
+\begin{enumerate}
+  \item \textbf{Der Engpass wandert.} Zuerst war es die Plattform, dann die Laufzeit, dann der Recall, am Ende die Precision. Jede Verbesserung deckt das nächste Problem auf. Eine frühe Messung am Ziel (statt auf dem Papier) hätte die Reihenfolge verkürzt.
+  \item \textbf{Trainingsmetriken sind keine Betriebsmetriken.} 96,5\,\% Precision in der gruppierten Kreuzvalidierung, 25\,\% im Crawl. Der Unterschied liegt in der Verteilung der Negativbeispiele, nicht im Modell. Wichtigste Lehre für ML-Projekte: eine Stichprobe aus der \emph{echten} Verteilung früh labeln.
+  \item \textbf{Eine zweite, stärkere Stufe lohnt für die Grauzone.} Ein billiges Modell filtert, ein teures prüft nur die Unsicheren. Das spart gut 80\,\% der LLM-Aufrufe gegenüber einer Vollprüfung.
+  \item \textbf{Die Evaluation braucht eigene Tests.} Der Fehler, der LLM-Urteile überschrieb, war nicht im Modell, sondern in der Auswertung, und er verfälschte alle Zahlen zuvor.
+  \item \textbf{Erst messen, dann bauen (und danach wieder messen).} OCR und Firecrawl waren plausibel, brachten aber kaum Ertrag; Seeds-only brachte \emph{in Minuten} +43 Hochschulen.
+  \item \textbf{Infrastruktur wegwerfbar, Daten nicht.} Der Sandbox-Verlust war verkraftbar, weil der Aufbau skriptbar war; verloren schmerzte, was nur in S3 lag.
+  \item \textbf{Randbedingungen sind Anforderungen.} SCPs, kurzlebige Schlüssel und Proxy waren keine Störungen, sondern gaben die Architektur der Nachbereitung vor.
+\end{enumerate}
+
+\section{Grenzen und Bedrohungen der Validität}\label{sec:grenzen}
+\paragraph{Das LLM ist die Referenz, nicht ein Mensch.} Alle Precision-Angaben messen die Übereinstimmung mit Claude Haiku~4.5. Ein systematischer LLM-Fehler (z.\,B.\ zu strenge Auslegung von „Sammelhandbuch“) steckt in allen Zahlen. Die manuelle Stichprobe von 120 Dokumenten ist vorbereitet und würde die einzige echte Genauigkeitsmessung liefern.
+
+\paragraph{Nicht alles ist LLM-geprüft.} Die \zTfidfHigh{} Positive mit Score $\ge$ 0,9 und die \zTfidfOther{} Positive aus anderen Läufen sind ungeprüft. Die Hochrechnung von 82,5\,\% aus 400 Dokumenten setzt Repräsentativität voraus; 159 Hosts mit zusammen rund 6.464 ungeprüften Positiven haben bei ihren übrigen Dokumenten unter 30\,\% Bestätigungsrate (z.\,B.\ uni-hamburg.de, uni-flensburg.de, tu-braunschweig.de). Dort ist der Anteil Fehlalarme vermutlich höher als der Durchschnitt. Das Ergebnis der laufenden Nachprüfung dieser Hosts verschiebt die Zahlen \TODO{nach Abschluss der LLM-Prüfung Zahlen und Aussage in Abschnitt ergänzen}.
+
+\paragraph{Der Recall ist nur grob bekannt.} Der Erwartungswert von rund \zZielwert{} ist eine Fachschätzung, keine Messung. Es gibt keine unabhängig gezählte Grundgesamtheit pro Hochschule. Die Schätzung verpasster Handbücher unter den Negativen stammt aus einer kleinen, nicht repräsentativen Stichprobe.
+
+\paragraph{Definition.} Ob Sammelhandbücher, Modulkataloge oder Studienverlaufspläne zählen, ist Auslegung. Die strenge Definition (19\,\% der Fehlalarme sind Einzelblätter) ist eine Entscheidung zugunsten der Precision; ein breiterer Begriff würde die Ergebnisliste vergrößern.
+
+\paragraph{Verzerrungen.} (1)~Das Trainingsset ist verzerrt zu Hochschulen mit großem Online-Angebot. (2)~Die Hochschulliste enthält mehr Fachhochschulen und private Hochschulen als Universitäten, die Abdeckung dort ist am schlechtesten. (3)~Der Crawl ist zu aktuellen Jahrgängen verzerrt. (4)~Kosten sind Schätzungen, Stunden sind Schätzungen, die Klicktiefe ist eine Näherung.
+
+\paragraph{Ethik und Recht.} Der Crawler beachtet robots.txt, drosselt Anfragen und greift ausschließlich öffentlich zugängliche Dokumente ab. Die Ausnahme für Discovery-Seeds (robots-Bypass für einzelne, per Suchindex bekannte Handbuch-URLs, Abschnitt~\ref{sec:crawler-robots}) ist standardmäßig aus und wurde nur für Hochschulen mit pauschaler Sperre eingesetzt; sie ist eine bewusste Abwägung, keine Selbstverständlichkeit. Es werden keine personenbezogenen Daten gezielt erhoben. Die Urheberrechtslage bei der Weitergabe der gesammelten Dokumente ist nicht geprüft \TODO{rechtliche Einordnung mit dem Betreuer klären; der Bericht ist kein juristisches Gutachten}.
