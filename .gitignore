@@ -37,3 +37,7 @@ mlclassifier/artifacts/*.jsonl
 *.tfstate.*
 *.tfvars
 !*.tfvars.example
+
+# Run manifests / LLM + OCR result files (100+ MB, regenerable from S3 + scripts)
+/*.jsonl
+auswertung/data/*.jsonl

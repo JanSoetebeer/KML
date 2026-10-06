@@ -107,6 +107,21 @@ pk = sum(1 for d in pilot if d["llm_is_match"])
 p, lo, hi = wilson(pk, len(pilot))
 KEY["pilot"] = {"n": len(pilot), "confirmed": pk, "precision": p, "ci95": [lo, hi]}
 n_high = tiers["tfidf_high"]
+# Never-reviewed >=0.9 docs now sit on non-suspect hosts only (suspect hosts were LLM-reviewed in a
+# separate pass), so estimate their precision from the pilot docs on non-suspect hosts.
+_hr = defaultdict(Counter)
+for d in deep:
+    if d.get("llm_reviewed") and not d.get("llm_batch", "").startswith("llm_suspect"):
+        _hr[d["hostname"]]["n"] += 1
+        _hr[d["hostname"]]["c"] += bool(d["llm_is_match"])
+suspect_hosts = {h for h, v in _hr.items() if v["n"] >= 10 and v["c"] / v["n"] < 0.3}
+pilot_ns = [d for d in pilot if d["hostname"] not in suspect_hosts]
+pk_ns = sum(1 for d in pilot_ns if d["llm_is_match"])
+p, lo, hi = wilson(pk_ns, len(pilot_ns))
+KEY["pilot_nonsuspect_hosts"] = {"n": len(pilot_ns), "confirmed": pk_ns, "precision": p, "ci95": [lo, hi]}
+sus = [d for d in deep if d.get("llm_batch", "").startswith("llm_suspect")]
+KEY["suspect_pass"] = {"n": len(sus), "confirmed": sum(1 for d in sus if d["llm_is_match"]),
+                       "rate": sum(1 for d in sus if d["llm_is_match"]) / max(1, len(sus)), "hosts": len(suspect_hosts)}
 KEY["estimate_true_in_tfidf_high"] = {"mid": round(n_high * p), "low": round(n_high * lo), "high": round(n_high * hi)}
 conf = tiers["llm_confirmed"]
 KEY["final_strict"] = conf
@@ -210,8 +225,9 @@ save(fig, "04_score_histogramm")
 
 # 05 -- LLM runs ----------------------------------------------------------------------------
 batches = [("llm_reviewed.jsonl", "Review-Band Aug-Lauf\n(Score 0,3–0,7)"), ("llm_mid", "Positive 0,5–0,9\n(Deep Run)"),
-           ("llm_pilot.jsonl", "Stichprobe Positive ≥ 0,9"), ("llm_ocr.jsonl", "OCR-Treffer\n(Score ≥ 0,5)")]
-fig, ax = plt.subplots(figsize=(9, 4.2))
+           ("llm_pilot.jsonl", "Stichprobe Positive ≥ 0,9"), ("llm_ocr.jsonl", "OCR-Treffer\n(Score ≥ 0,5)"),
+           ("llm_suspect", "Positive ≥ 0,9 auf\nverdächtigen Hosts")]
+fig, ax = plt.subplots(figsize=(10.5, 4.2))
 b_c, b_r = [], []
 for key, _ in batches:
     sel = [d for d in reviewed if d.get("llm_batch", "").startswith(key.replace(".jsonl", ""))]
@@ -603,20 +619,43 @@ ax.grid(axis="x", visible=False)
 KEY["precision_gap"] = {"training_cv_precision": tr_vals[0], "production_mid_0.5_0.9": mid_p, "production_high_pilot": real_p}
 save(fig, "23_training_vs_praxis", "Produktion: Referenz = LLM-Urteil (Haiku 4.5), nicht manuell verifiziert.")
 
-# --- extra: sample for manual validation (CSV) ----------------------------------------------------
-random.seed(7)
-samp = []
-for t, n_ in (("llm_confirmed", 40), ("llm_rejected", 40), ("tfidf_high", 40)):
-    pool = [d for d in docs if d["tier"] == t]
-    samp += random.sample(pool, min(n_, len(pool)))
-random.shuffle(samp)
-import csv  # noqa: E402
+# 24 -- host-level precision gap (suspect hosts) -----------------------------------------------------
+sp, sl, sh = KEY["suspect_pass"]["rate"], 0, 0
+sp_, sl_, sh_ = wilson(KEY["suspect_pass"]["confirmed"], KEY["suspect_pass"]["n"])
+nsp = KEY["pilot_nonsuspect_hosts"]
+groups = [("Positive ≥ 0,9 auf\n„verdächtigen“ Hosts\n(alle LLM-geprüft)", sp_, sl_, sh_, KEY["suspect_pass"]["n"], ORANGE),
+          ("Positive ≥ 0,9 auf\nübrigen Hosts\n(Pilot-Stichprobe)", nsp["precision"], nsp["ci95"][0], nsp["ci95"][1], nsp["n"], AQUA)]
+fig, ax = plt.subplots(figsize=(7.5, 4.2))
+for i, (lab, v, a, b, n_, col) in enumerate(groups):
+    ax.bar(i, v * 100, color=col, width=0.5)
+    ax.errorbar(i, v * 100, yerr=[[(v - a) * 100], [(b - v) * 100]], fmt="none", ecolor=INK2, capsize=4)
+    ax.text(i, b * 100 + 2, f"{v*100:.0f} %  (n={fmt(n_)})", ha="center", fontsize=9, color=INK2)
+ax.set_xticks([0, 1], [g[0] for g in groups])
+ax.set_ylim(0, 112)
+ax.set_ylabel("Vom LLM bestätigt (%)")
+ax.set_title("Der Host entscheidet mit: gleiche Score-Klasse, andere Precision")
+ax.grid(axis="x", visible=False)
+save(fig, "24_hosts_precision", "Verdächtig = Host, auf dem das LLM bei ≥ 10 anderen Dokumenten weniger als 30 % bestätigt hat. Fehlerbalken = 95-%-Wilson-Intervall.")
 
-with open(ROOT / "auswertung" / "stichprobe_manuelle_pruefung.csv", "w", encoding="utf-8-sig", newline="") as fh:
-    w_ = csv.writer(fh, delimiter=";")
-    w_.writerow(["nr", "url", "manuell_ist_modulhandbuch (ja/nein)", "---erst nach der Pruefung ansehen---", "tfidf_score", "llm_urteil", "llm_begruendung"])
-    for i, d in enumerate(samp, 1):
-        w_.writerow([i, d["url"], "", "", d.get("module_handbook_score"), d["tier"], d.get("llm_reason", "")])
+# --- extra: sample for manual validation (CSV) ----------------------------------------------------
+SAMPLE_CSV = ROOT / "auswertung" / "stichprobe_manuelle_pruefung.csv"
+if SAMPLE_CSV.exists():
+    print("keep existing", SAMPLE_CSV.name, "(manual answers refer to it)")
+else:
+    random.seed(7)
+    samp = []
+    for t, n_ in (("llm_confirmed", 40), ("llm_rejected", 40), ("tfidf_high", 40)):
+        pool = [d for d in docs if d["tier"] == t]
+        samp += random.sample(pool, min(n_, len(pool)))
+    random.shuffle(samp)
+    import csv  # noqa: E402
+
+    with open(ROOT / "auswertung" / "stichprobe_manuelle_pruefung.csv", "w", encoding="utf-8-sig", newline="") as fh:
+        w_ = csv.writer(fh, delimiter=";")
+        w_.writerow(["nr", "url", "manuell_ist_modulhandbuch (ja/nein)", "---erst nach der Pruefung ansehen---", "tfidf_score", "llm_urteil", "llm_begruendung"])
+        for i, d in enumerate(samp, 1):
+            w_.writerow([i, d["url"], "", "", d.get("module_handbook_score"), d["tier"], d.get("llm_reason", "")])
+
 
 json.dump(KEY, open(DATA / "kennzahlen.json", "w", encoding="utf-8"), ensure_ascii=False, indent=1)
 print("done")
