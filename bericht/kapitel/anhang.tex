@@ -42,19 +42,13 @@ Sept.\ \emph{content + Metadaten} (0,509) & 0,976 & 0,959 & 0,950 & 0,958 & 0,95
 \paragraph{Konfusionsmatrizen.} MVP \emph{content}: 128 richtig positiv, 6 falsch negativ, 49 richtig negativ, 19 falsch positiv (202 Dokumente, 21 Hochschulen); bei Schwelle 0,5: Precision 0,907, Recall 0,873, 17 statt 6 übersehene Handbücher. September \emph{content}: 1.873 / 98 / 656 / 68 (2.695 Dokumente, 269 Hochschulen); bei Schwelle 0,5: Precision 0,952, Recall 0,985 (1.942 TP, 29 FN, 625 TN, 99 FP).
 
 \chapter{Reproduzierbarkeit}\label{app:repro}
-Alle Zahlen und Grafiken lassen sich aus den Läufen neu erzeugen:
+Quellcode und Commit-Historie: \url{https://github.com/JanSoetebeer/KML}. Die Auswertung lässt sich aus den Läufen neu erzeugen (aus dem Repo-Root):
 \begin{lstlisting}
-# 1. Endliste und Kennzahlen (aus Repo-Root)
-python auswertung/build_final.py
-.venv\Scripts\python auswertung\make_charts.py       # 23 Grafiken + kennzahlen.json
-
-# 2. Berichtsgrafiken und Zahlenmakros
-.venv\Scripts\python bericht\make_report_charts.py   # B01-B09, zahlen.tex, Wochentabellen
-
-# 3. PDF bauen
-cd bericht ; latexmk -pdf main.tex
+python auswertung/build_final.py                     # Endliste aus allen Läufen
+python auswertung/build_eval_manifests.py            # Manifeste je Variante
+.venv\Scripts\python auswertung\make_charts.py       # Grafiken und Kennzahlen
 \end{lstlisting}
-Die gesamte Strecke steht in \texttt{bericht/build.ps1}. Handgepflegte Eingaben: \texttt{bericht/daten/stunden.csv} (Stunden und Tätigkeiten), \texttt{bericht/daten/kosten.csv} (Kosten), \texttt{bericht/daten/s3\_objekte.csv} (Auflistung des Buckets, erzeugt mit \texttt{aws s3 ls --recursive}). Evaluationsberichte (\texttt{eval\_*.html}) entstehen mit \texttt{python -m webscraper.evaluation} aus \texttt{webscraper/}.
+Evaluationsberichte (\texttt{eval\_*.html}) entstehen mit \texttt{python -m webscraper.evaluation} aus \texttt{webscraper/}.
 
 \chapter{Weitere Auswertungsgrafiken}\label{app:grafiken}
 Die folgenden Grafiken der Abschlussauswertung werden im Text nicht direkt referenziert.

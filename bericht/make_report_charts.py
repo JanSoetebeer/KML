@@ -113,8 +113,8 @@ bars = ax.bar(x, vals, color=cols, width=0.72)
 bar_labels(ax, [b for b, v in zip(bars, vals) if v > 0], f=lambda v: de(v), pad=0.25)
 ax.set_xticks(x)
 ax.set_xticklabels([f"KW {r['kw']}" for r in stunden], rotation=60, fontsize=8.5, ha="right")
-ax.set_ylabel("geschätzte Stunden (Jan)")
-ax.set_title("Arbeitsaufwand pro Kalenderwoche (Schätzung)")
+ax.set_ylabel("Stunden (Jan)")
+ax.set_title("Arbeitsaufwand pro Kalenderwoche")
 from matplotlib.patches import Patch  # noqa: E402
 
 phase_names = {"P1": "Phase 1: Prototyp & AWS-Grundlage", "P2": "Phase 2: ML & Plattform",
@@ -140,19 +140,51 @@ for yi, r in zip(y, order):
     est = r["status"] == "schaetzung"
     ax.barh(yi, float(r["usd"]), color=BLUE if not est else "#a9c8ee", edgecolor=BLUE, hatch="//" if est else None,
             height=0.66)
-    ax.text(float(r["usd"]) + 1.0, yi, f"{de(float(r['usd']), 0)} $" + (" (Schätzung)" if est else ""),
+    ax.text(float(r["usd"]) + 1.0, yi, f"{de(float(r['usd']), 2)} $" + (" (Schätzung)" if est else ""),
             va="center", fontsize=8.5, color=INK2)
 ax.set_yticks(y)
 ax.set_yticklabels([r["posten"] for r in order], fontsize=9)
-ax.set_xlabel("US-Dollar (gesamt über Projektlaufzeit)")
-ax.set_title("Kosten nach Posten (vorläufig – Abrechnung ausstehend)")
-ax.set_xlim(0, max(float(r["usd"]) for r in order) * 1.32)
+ax.set_xlabel("US-Dollar (Juli bis 5. Oktober 2026)")
+tot = sum(float(r["usd"]) for r in kosten)
+ax.set_title(f"Cloud-Kosten nach Posten (Abrechnung, gesamt {de(tot, 2)} $)")
+ax.set_xlim(0, max(float(r["usd"]) for r in order) * 1.3)
 ax.grid(axis="y", visible=False)
 save(fig, "B02_kosten")
-tot = sum(float(r["usd"]) for r in kosten)
-Z["KostenGesamt"] = de(tot, 0)
+Z["KostenGesamt"] = de(tot, 2)
 for r in kosten:
     Z["Kosten" + re.sub(r"[^A-Za-z]", "", r["id"])] = de(float(r["usd"]), 0)
+
+# Kosten pro Tag (aus der Abrechnungs-CSV, siehe daten/kosten_pro_tag.json)
+days = json.load(open(BER / "daten" / "kosten_pro_tag.json", encoding="utf-8"))
+from datetime import date as _date  # noqa: E402
+
+dd = [_date.fromisoformat(d) for d, _ in days]
+vv = [v for _, v in days]
+cum = np.cumsum(vv)
+fig, ax = plt.subplots(figsize=(9.2, 3.8))
+ax.bar(range(len(vv)), vv, color=BLUE, width=0.8)
+ax2 = ax.twinx()
+ax2.plot(range(len(vv)), cum, color=ORANGE, lw=1.6)
+ax2.axhline(50, color=ORANGE, lw=0.8, ls="--")
+ax2.text(1, 52, "Budgetgrenze Sandbox-Pool (50 $)", color=ORANGE, fontsize=8)
+ax2.set_ylabel("kumuliert [$]", color=ORANGE)
+ax2.grid(False)
+ax2.spines["right"].set_visible(True)
+ax2.spines["right"].set_color(GRID)
+ticks = [i for i, d in enumerate(dd) if (d.day == 1 and d.month != 10) or d.isoformat() in ("2026-08-12", "2026-09-16", "2026-09-30")]
+ax.set_xticks(ticks)
+ax.set_xticklabels([dd[i].strftime("%d.%m.") for i in ticks], rotation=45, ha="right", fontsize=8.5)
+ax.set_ylabel("Tageskosten [$]")
+ax.set_title("Cloud-Kosten pro Tag und kumuliert")
+ax.grid(axis="x", visible=False)
+for iso, lab in (("2026-09-02", "02.09. LLM-Review"), ("2026-09-30", "30.09.--02.10. LLM-Review")):
+    i = [d.isoformat() for d in dd].index(iso)
+    ax.annotate(lab, (i, vv[i]), xytext=(i - 25 if iso.endswith("02") else i - 33, vv[i] + 1.5), fontsize=8, color=INK2)
+save(fig, "B02b_kosten_pro_tag")
+i50 = int(np.argmax(cum >= 50))
+Z["KostenTagGrenze"] = dd[i50].strftime("%d.%m.")
+Z["KostenSepTag"] = de(vv[[d.isoformat() for d in dd].index("2026-09-02")], 2)
+Z["KostenSepKum"] = de(cum[[d.isoformat() for d in dd].index("2026-09-02")], 0)
 
 # ---------------------------------------------------------------- 3) Verlauf Abdeckung/Positive
 steps = [
@@ -356,7 +388,8 @@ target = 40000                               # Fachschätzung des Betreuers/Proj
 pdfs_proj = target * yield_ratio
 llm_share = KEY["llm_reviewed_docs"] / pdfs_now
 llm_docs_now = KEY["llm_reviewed_docs"]
-llm_cost_now = 75.0
+llm_cost_now = float(next(r["usd"] for r in kosten if r["id"] == "Bedrock"))
+K_UNRES = KEY["tiers"]["unresolved"]
 llm_docs_proj = pdfs_proj * llm_share
 llm_cost_proj = llm_cost_now * llm_docs_proj / llm_docs_now
 gb_now = (sum(s3.values()) / 1e9) if s3 else 154.0
@@ -391,16 +424,16 @@ reviewed = KEY["llm_reviewed_docs"]
 sec = 30
 fig, ax = plt.subplots(figsize=(8.2, 3.2))
 items = [("Alle TF-IDF-Positive manuell\nprüfen (Annahme 30 s/Dok.)", reviewed * sec / 3600, GRAY),
-         ("Mit LLM-Zweitstufe:\nStichprobe + Verdachtsliste (Annahme 30 s/Dok.)", (120 + 1658) * sec / 3600, BLUE)]
+         ("Mit LLM-Zweitstufe:\nStichprobe + Verdachtsliste (Annahme 30 s/Dok.)", (20 + K_UNRES) * sec / 3600, BLUE)]
 b = ax.barh([i[0] for i in items][::-1], [i[1] for i in items][::-1], color=[i[2] for i in items][::-1])
 bar_labels(ax, b, f=lambda v: de(v, 0) + " h", pad=5, horizontal=True)
 ax.set_xlabel("Stunden")
-ax.set_title("Manueller Prüfaufwand: ohne vs. mit LLM-Zweitstufe (Modellrechnung)")
+ax.set_title("Manueller Prüfaufwand: ohne vs. mit LLM-Zweitstufe")
 ax.set_xlim(0, items[0][1] * 1.2)
 ax.grid(axis="y", visible=False)
 save(fig, "B09_manueller_aufwand")
 Z["ManuellOhneH"] = de(reviewed * sec / 3600, 0)
-Z["ManuellMitH"] = de((120 + 1658) * sec / 3600, 0)
+Z["ManuellMitH"] = de((20 + K_UNRES) * sec / 3600, 0)
 
 # ---------------------------------------------------------------- Jahre / Alter -------------
 years = []
@@ -437,6 +470,17 @@ Z.update({
     "TfidfHigh": de(K["tiers"]["tfidf_high"]),
     "TfidfOther": de(K["tiers"]["tfidf_other"]),
     "Unresolved": de(K["tiers"]["unresolved"]),
+    "SuspectN": de(K["suspect_pass"]["n"]),
+    "SuspectOK": de(K["suspect_pass"]["confirmed"]),
+    "SuspectPct": de(100 * K["suspect_pass"]["rate"], 0),
+    "SuspectHosts": str(K["suspect_pass"]["hosts"]),
+    "NonSuspectN": str(K["pilot_nonsuspect_hosts"]["n"]),
+    "NonSuspectOK": str(K["pilot_nonsuspect_hosts"]["confirmed"]),
+    "NonSuspectPct": de(100 * K["pilot_nonsuspect_hosts"]["precision"], 1),
+    "NonSuspectLo": de(100 * K["pilot_nonsuspect_hosts"]["ci95"][0], 1),
+    "NonSuspectHi": de(100 * K["pilot_nonsuspect_hosts"]["ci95"][1], 1),
+    "PrecisionEnd": de(100 * K["final_likely_estimated_true"]["mid"] / K["final_likely_listed"], 0),
+    "RecallPct": de(100 * K["dedup"]["likely_unique_host_filename"] / 40000, 0),
     "TfidfNegative": de(K["tiers"]["tfidf_negative"]),
     "InitialPositive": de(K["initial_tfidf_positive"]),
     "FinalStrict": de(K["final_strict"]),
@@ -482,23 +526,23 @@ def macro_name(k):
 
 
 with open(BER / "zahlen.tex", "w", encoding="utf-8") as f:
-    f.write("% AUTOMATISCH ERZEUGT von bericht/make_report_charts.py - nicht von Hand editieren.\n")
+    f.write("% Kennzahlen des Berichts\n")
     for k in sorted(Z):
         f.write(f"\\newcommand{{\\{macro_name(k)}}}{{{Z[k]}}}\n")
 print("zahlen.tex:", len(Z), "Makros")
 
 # ---------------------------------------------------------------- wochen.tex (Aktivitätstabellen)
 with open(BER / "wochen_jan.tex", "w", encoding="utf-8") as f:
-    f.write("% AUTOMATISCH ERZEUGT aus daten/stunden.csv\n")
+    f.write("% Wochenübersicht Jan Soetebeer\n")
     total = 0.0
     for r in stunden:
         h = float(r["stunden_jan"])
         total += h
-        f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & {r['taetigkeit']} & ca.\\,{de(h, 0)} \\\\\n")
+        f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & {r['taetigkeit']} & {de(h, 0)} \\\\\n")
     f.write("\\midrule\n")
-    f.write(f"\\multicolumn{{3}}{{l}}{{\\textbf{{Summe (Schätzung)}}}} & \\textbf{{ca.\\,{de(total, 0)}}} \\\\\n")
+    f.write(f"\\multicolumn{{3}}{{l}}{{\\textbf{{Summe}}}} & \\textbf{{{de(total, 0)}}} \\\\\n")
 with open(BER / "wochen_sascha.tex", "w", encoding="utf-8") as f:
-    f.write("% AUTOMATISCH ERZEUGT aus daten/stunden.csv - Platzhalter für Sascha Lauk\n")
+    f.write("% Wochenübersicht Sascha Lauk\n")
     for r in stunden:
         f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & \\saschaCell{{}} & \\saschaCell{{}} \\\\\n")
     f.write("\\midrule\n")

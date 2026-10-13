@@ -32,7 +32,9 @@ FH Münster & \textbf{null} & JavaScript-Startseite ohne Sitemap: Scrapy sieht k
 \end{tabularx}
 \end{table}
 
-\section{Erster Großlauf über die Hochschulliste (12. August)}
+\section{Großlauf über die Hochschulliste (12. August)}
+Der erste Großlauf über die Hochschulliste lag im verlorenen Sandbox-Pool (Kapitel~\ref{ch:aws}) und wurde am 12.\,August in der neu aufgebauten Umgebung wiederholt; alle folgenden Zahlen stammen aus dieser Wiederholung.
+
 Der Großlauf über 411 Listeneinträge (404 Hochschulen nach Zusammenführung von Einträgen mit gleicher Domain) lief \zDauerAug{}\,h auf einem Fargate-Task mit 4\,vCPU und 16\,GB und lud 65.944 PDFs herunter (Mittel rund \zRateAug{} PDFs pro Stunde, Median 285~s je Hochschule). Die Evaluation (eigenes Auswertungspaket mit HTML-Bericht, Szenarien nach Typ, Träger, Größe und Bundesland) ergab:
 \begin{itemize}
   \item 11.579 automatisch positive, 8.166 Review-Fälle und 46.199 negative Dokumente;

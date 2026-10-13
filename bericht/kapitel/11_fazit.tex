@@ -13,8 +13,8 @@ Das Projekt hat aus einem Scrapy-Prototyp eine skalierbare Erhebungs- und Klassi
 \textbf{Kriterium} & \textbf{Erfüllt?} & \textbf{Begründung} \\
 \midrule
 A1 vollständig durchsuchen & weitgehend & Alle \zUnisTotal{} Hochschulen wurden bearbeitet; Seiten mit JavaScript, Login oder anderer Domain nicht erreichbar. \\
-A2 alle Handbücher finden (Recall) & \textbf{teilweise} & Etwa 40--47\,\% des Erwartungswerts; 39 Hochschulen ohne Fund, 117 mit Dokumenten, aber ohne bestätigtes Handbuch. \\
-A3 Nicht-Handbücher erkennen (Precision) & ja, durch LLM-Stufe & TF-IDF allein reicht nicht (25--82\,\%); die streng bestätigte Liste ist vom LLM geprüft, der Rest geschätzt $\approx$ 89\,\%. \\
+A2 alle Handbücher finden (Recall) & \textbf{teilweise} & Rund \zRecallPct\,\% des Erwartungswerts; \zUnisNone{} Hochschulen ohne Fund, rund 110 mit Dokumenten, aber ohne bestätigtes Handbuch (streng). \\
+A3 Nicht-Handbücher erkennen (Precision) & ja, durch LLM-Stufe & TF-IDF allein reicht nicht (25--82\,\%); die streng bestätigte Liste ist vom LLM geprüft, die erweiterte Liste hat geschätzt rund \zPrecisionEnd\,\% Precision (gemessen am LLM). \\
 A4 strukturiert speichern & ja & S3-Ablage mit Manifest (Score, Quelle, Lauf, LLM-Begründung); Transparenz je Entscheidung. Eine Datenbank für Inhalte ist offen. \\
 \bottomrule
 \end{tabularx}
@@ -25,9 +25,9 @@ Das wichtigste inhaltliche Ergebnis ist \emph{negativ} und nützlich: Der Klassi
 \section{Ausblick}
 \subsection{Qualität und Recall}
 \begin{itemize}
-  \item \textbf{Schwelle und Modell.} Im Live-Crawl die vorgeschlagene Schwelle (0,8) statt 0,5 verwenden; den Dateinamen als Merkmal aufnehmen (Abschnitt~\ref{ch:klassifikation}); mit den rund 27.700 LLM-Labels als \emph{Hard Negatives} nachtrainieren. Die dazu nötige Retrain-Strecke aus Manifesten (\texttt{ingest --manifest} mit S3-Abruf) ist vorhanden.
-  \item \textbf{Manuelle Referenz.} Die vorbereitete Stichprobe von 120 Dokumenten auswerten, um die LLM-Genauigkeit zu messen.
-  \item \textbf{Verdächtige Hosts.} Die ungeprüften Positive der 159 Hosts mit niedriger Bestätigungsrate LLM-prüfen (rund 15--20\,\$).
+  \item \textbf{Schwelle und Modell.} Im Live-Crawl die vorgeschlagene Schwelle (0,8) statt 0,5 verwenden; den Dateinamen als Merkmal aufnehmen (Abschnitt~\ref{ch:klassifikation}); Dateiname und Host als Merkmale prüfen; mit den über 34.000 LLM-Labels als \emph{Hard Negatives} nachtrainieren; mehr Text als nur die ersten 8.000 Zeichen an das LLM geben. Die dazu nötige Retrain-Strecke aus Manifesten (\texttt{ingest --manifest} mit S3-Abruf) ist vorhanden.
+  \item \textbf{Manuelle Referenz.} Von der vorbereiteten Stichprobe von 120 Dokumenten wurden nur 20 geprüft; eine vollständige Auswertung würde die LLM-Genauigkeit belastbarer messen.
+  \item \textbf{Ungeprüfte Positive.} Die \zTfidfHigh{} ungeprüften Positive (rund 18\,\$) und die \zTfidfOther{} Positive aus dem August-Lauf (rund 16\,\$) ließen sich bei Bedarf durch das LLM schicken.
   \item \textbf{Seitenebene statt Dateiebene.} JavaScript-Portale (z.\,B.\ IU) liefern kein PDF; die Klassifikation von gerenderten Katalogseiten ist gebaut und wartet auf einen Einsatz mit Playwright oder Firecrawl.
   \item \textbf{Manuelle Nachsuche} für die 39 leeren und die kleinen privaten Hochschulen, deren Handbücher nicht online liegen oder hinter Login.
 \end{itemize}

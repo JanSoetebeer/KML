@@ -1,8 +1,7 @@
 id,posten,usd,status
-Bedrock,"Amazon Bedrock (Claude Haiku 4.5, ~27.700 Dokumente)",75,schaetzung
-Ec,"EC2 t3.small + EBS + Elastic IP (Webapp)",45,schaetzung
-Fargate,"ECS Fargate (Großläufe und Tests)",8,schaetzung
-Speicher,"S3-Speicher (154 GB) + Anfragen",6,schaetzung
-Lambda,"Lambda (Tests, Interaktivbetrieb)",2,schaetzung
-Sonstiges,"Sonstiges (ECR, DynamoDB, CloudWatch, Transfer)",4,schaetzung
-Extern,"Common Crawl, Serper (Free), Firecrawl (Free)",0,beleg
+Bedrock,"Amazon Bedrock (Claude Haiku 4.5, 34.141 Dokumente)",107.24,beleg
+Ec,"Webapp-Server: EC2 t3.small, IPv4-Adressen, EBS",28.11,beleg
+Steuern,"Steuern",7.14,beleg
+Fargate,"ECS Fargate (Großläufe und Tests)",7.06,beleg
+Speicher,"S3-Speicher (154 GB)",5.73,beleg
+Sonstiges,"Sonstiges (ECR, DynamoDB, Lambda, übrige)",0.32,beleg

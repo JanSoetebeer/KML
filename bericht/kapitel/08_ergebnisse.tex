@@ -1,6 +1,6 @@
 \chapter{Ergebnisse und Kennzahlen}\label{ch:ergebnisse}
 
-Dieses Kapitel beantwortet die Leitfragen aus Kapitel~\ref{ch:einleitung} mit Zahlen. Alle Werte stammen aus der Abschlussauswertung (\texttt{auswertung/data/kennzahlen.json}) und den S3-Auflistungen und sind im Bericht als Makros hinterlegt, sodass sie nach den abschließenden LLM-Prüfungen automatisch aktualisiert werden. \TODO{Nach Abschluss der laufenden LLM-Prüfung der ca.\ 6.000 verdächtigen Dokumente: build.ps1 ausführen, Zahlen und Text prüfen}.
+Dieses Kapitel beantwortet die Leitfragen aus Kapitel~\ref{ch:einleitung} mit Zahlen. Alle Werte stammen aus der Abschlussauswertung und den S3-Auflistungen; Stand ist der endgültige Datenstand vom 6.\,Oktober 2026.
 
 \section{Kennzahlen auf einen Blick}
 \begin{table}[htbp]
@@ -79,8 +79,8 @@ Die Antwort hängt davon ab, was als Referenz gilt (vgl.\ Kapitel~\ref{ch:klassi
   \item \textbf{Trainingsmetrik} (gruppierte Kreuzvalidierung): Precision \zTrainPrec\,\%, Recall rund 95\,\%.
   \item \textbf{Realer Crawl, Score 0,5--0,9:} Precision rund \zMidPrec\,\% (Referenz LLM).
   \item \textbf{Realer Crawl, Score $\ge$ 0,9:} Precision \zPilotPct\,\% (Pilot, $n=\zPilotN$).
-  \item \textbf{Endliste erweitert:} geschätzt rund \zEstTrue{} echte von \zFinalListed{} gelisteten Dokumenten, das entspricht einer Precision von rund 89\,\%; die streng bestätigte Liste ist per Definition vom LLM bestätigt; ihre tatsächliche Fehlerquote entspricht der Fehlerquote des LLM, die erst die manuelle Stichprobe messen kann (die Referenz ist das LLM, nicht ein Mensch).
-  \item \textbf{Recall:} unbekannt, nur grob abschätzbar: Gegenüber dem Erwartungswert von rund \zZielwert{} Handbüchern liegt die geschätzte Zahl echter Treffer bei rund 40--47\,\%. Aus den nicht LLM-geprüften Negativen mit Score 0,3--0,5 (18.252 Dokumente) lässt sich eine kleine Stichprobe von rund \zRecallMissed{} verpassten Handbüchern schätzen, \emph{sehr unsicher} (\cref{fig:21_recall_luecke}).
+  \item \textbf{Endliste erweitert:} geschätzt rund \zEstTrue{} echte von \zFinalListed{} gelisteten Dokumenten, das entspricht einer Precision von rund \zPrecisionEnd\,\% (gemessen am LLM-Urteil; Grundlage: \zNonSuspectOK{} von \zNonSuspectN{} bestätigt in der Stichprobe auf den übrigen Hosts); die streng bestätigte Liste ist per Definition vom LLM bestätigt; ihre tatsächliche Fehlerquote entspricht der Fehlerquote des LLM, die nur die kleine manuelle Gegenprobe (17 von 20 Übereinstimmungen, 85\,\%) grob andeutet; die Referenz ist das LLM, nicht ein Mensch.
+  \item \textbf{Recall:} unbekannt, nur grob abschätzbar: Gegenüber dem Erwartungswert von rund \zZielwert{} Handbüchern liegen die \zUniqueLikely{} eindeutigen gelisteten Dokumente bei rund \zRecallPct\,\% (eine Größenordnung, keine Messung). Aus den nicht LLM-geprüften Negativen mit Score 0,3--0,5 (18.252 Dokumente) lässt sich eine kleine Stichprobe von rund \zRecallMissed{} verpassten Handbüchern schätzen, \emph{sehr unsicher} (\cref{fig:21_recall_luecke}).
 \end{itemize}
 
 \abb[0.85]{htbp}{21_recall_luecke}{Was vorliegt und was fehlen könnte (grobe Schätzung).}
@@ -89,12 +89,13 @@ Die Antwort hängt davon ab, was als Referenz gilt (vgl.\ Kapitel~\ref{ch:klassi
 Ohne die LLM-Zweitstufe müssten alle Dokumente der Grauzone manuell geprüft werden. Mit ihr bleiben:
 \begin{itemize}
   \item \zUnresolved{} Dokumente, bei denen weder TF-IDF noch OCR/LLM ein Urteil liefern konnten (kein Text, Fehler);
-  \item eine Stichprobe von 120 Dokumenten zur Messung der LLM-Genauigkeit (\texttt{stichprobe\_manuelle\_pruefung.csv}, vorbereitet, noch nicht ausgewertet \TODO{Stichprobe auswerten und Ergebnis ergänzen: Übereinstimmung Mensch--LLM});
-  \item die 159 verdächtigen Hosts mit rund 6.464 ungeprüften Positiven (LLM-Bestätigungsrate unter 30\,\% bei den übrigen Dokumenten dieser Hosts), deren LLM-Prüfung zum Zeitpunkt des Berichts läuft.
+  \item \zTfidfHigh{} Positive mit Score $\ge$ 0,9 auf den übrigen Hosts, die nicht LLM-geprüft sind (geschätzt rund \zNonSuspectPct\,\% echt) und in der erweiterten, nicht aber in der strengen Liste stehen;
+  \item \zTfidfOther{} Positive aus dem August- und den Seeds-Läufen, die ungeprüft und in keiner der beiden Listen enthalten sind;
+  \item die manuelle Gegenprobe von 20 Dokumenten (Abschnitt~\ref{sec:llm}); weitere manuelle Prüfungen wurden nicht durchgeführt.
 \end{itemize}
-Bei einer Annahme von 30 Sekunden je Dokument ersparte die LLM-Zweitstufe rund \zManuellOhneH{} Stunden manueller Prüfung (\cref{fig:B09_manueller_aufwand}; Modellrechnung, keine Messung).
+Bei einer Annahme von 30 Sekunden je Dokument ersparte die LLM-Zweitstufe rund \zManuellOhneH{} Stunden manueller Prüfung (\cref{fig:B09_manueller_aufwand}).
 
-\abb[0.8]{htbp}{B09_manueller_aufwand}{Manueller Prüfaufwand ohne und mit LLM-Zweitstufe (Modellrechnung, 30\,s je Dokument).}
+\abb[0.8]{htbp}{B09_manueller_aufwand}{Manueller Prüfaufwand ohne und mit LLM-Zweitstufe (30\,s je Dokument).}
 
 \section{Wie viele Duplikate gibt es?}
 In der erweiterten Liste sind \zDupLikely{} Einträge Duplikate (gleicher Host und gleicher Dateiname), in der strengen Liste \zDupStrict{} (\cref{fig:22_duplikate}). Eindeutig bleiben \zUniqueLikely{} (erweitert) bzw.\ \zUniqueStrict{} (streng) Dokumente. Die Duplikate entstehen, weil dieselbe Datei über mehrere Seiten verlinkt ist oder in mehreren Läufen vorkommt; auf Speicherebene kommen die physischen Duplikate erzwungener Läufe hinzu (siehe oben). Die Deduplikation per Host und Dateiname ist eine Näherung; zwei Hochschulen mit gleichnamigen Dateien auf getrennten Hosts bleiben richtig getrennt.
@@ -107,11 +108,11 @@ Das Erscheinungsjahr ist nur indirekt bestimmbar. Bei \zJahrAnzahl{} der geliste
 \abb[0.85]{htbp}{19_jahre_im_dateinamen}{Jahreszahlen in den Dateinamen der gelisteten Dokumente.}
 
 \section{In welcher Tiefe der Webseiten liegen die Dokumente?}
-Die Klicktiefe wurde im Manifest nicht protokolliert. Als Näherung dient die \emph{Pfadtiefe der Fundseite} (Anzahl der URL-Segmente der Seite, die auf das Dokument verlinkt). Der häufigste Wert über alle PDFs ist \zTiefeModusAlle, bei den gelisteten Handbüchern \zTiefeModusMH; \zTiefeMHBisVier\,\% der Handbücher liegen auf Fundseiten mit Pfadtiefe bis~4, Handbücher liegen also im Mittel \emph{tiefer} als Durchschnitts-PDFs (\cref{fig:B06_tiefe}). Das stützt die Erfahrung aus Kapitel~\ref{ch:crawler}: Eine feste Tiefe von 2, wie sie der erste Crawl nutzte, verpasst den Großteil. \TODO{Für eine echte Klicktiefenstatistik die Tiefe im Manifest mitschreiben (Scrapy-Meta \texttt{depth}); für diesen Bericht Näherung belassen}
+Die Klicktiefe wurde im Manifest nicht protokolliert. Als Näherung dient die \emph{Pfadtiefe der Fundseite} (Anzahl der URL-Segmente der Seite, die auf das Dokument verlinkt). Der häufigste Wert über alle PDFs ist \zTiefeModusAlle, bei den gelisteten Handbüchern \zTiefeModusMH; \zTiefeMHBisVier\,\% der Handbücher liegen auf Fundseiten mit Pfadtiefe bis~4, Handbücher liegen also im Mittel \emph{tiefer} als Durchschnitts-PDFs (\cref{fig:B06_tiefe}). Das stützt die Erfahrung aus Kapitel~\ref{ch:crawler}: Eine feste Tiefe von 2, wie sie der erste Crawl nutzte, verpasst den Großteil. Eine echte Klicktiefenstatistik wäre möglich, wenn die Tiefe künftig im Manifest mitgeschrieben würde (Scrapy-Meta \texttt{depth}).
 
 \abb[0.85]{htbp}{B06_tiefe}{Pfadtiefe der Fundseiten (Näherung für die Klicktiefe) für alle PDFs und die gelisteten Modulhandbücher.}
 
 \section{Welche Datenmenge wäre bei einer deutschlandweiten Vollerhebung zu erwarten?}
-Die Hochschulliste umfasst \zUnisTotal{} Hochschulen und damit praktisch das gesamte Hochschulwesen; die \emph{Breite} der Erhebung ist also bereits deutschlandweit, die \emph{Tiefe} noch nicht. Für den Erwartungswert von rund \zZielwert{} Modulhandbüchern (Fachschätzung) liefert eine lineare Hochrechnung bei gleicher Ausbeute (\zPDFsProMH{} PDFs je echtem Modulhandbuch) rund \zPDFsHochrechnung{} zu sammelnde PDFs, rund \zGBHochrechnung{}\,GB Speicher und rund \zLLMDocsHochrechnung{} LLM-geprüfte Dokumente mit Kosten von etwa \zLLMKostenHochrechnung{}\,\$ (\cref{fig:B08_hochrechnung}). Die Rechenkosten des Crawls bleiben auch dann einstellig. Die Hochrechnung ist eine \emph{Untergrenze}: Die noch fehlenden Handbücher liegen auf den schwer erreichbaren Seiten (kleine, private, JavaScript, Login), die Ausbeute pro PDF wird dort schlechter sein. Wesentlich realistischer als mehr Crawl-Volumen ist daher ein anderer Weg zu den fehlenden Handbüchern (Discovery, Seitenebene, manuelle Nachsuche in der Liste der 39 leeren und der 117 Hochschulen ohne bestätigtes Handbuch).
+Die Hochschulliste umfasst \zUnisTotal{} Hochschulen und damit praktisch das gesamte Hochschulwesen; die \emph{Breite} der Erhebung ist also bereits deutschlandweit, die \emph{Tiefe} noch nicht. Für den Erwartungswert von rund \zZielwert{} Modulhandbüchern (Fachschätzung) liefert eine lineare Hochrechnung bei gleicher Ausbeute (\zPDFsProMH{} PDFs je echtem Modulhandbuch) rund \zPDFsHochrechnung{} zu sammelnde PDFs, rund \zGBHochrechnung{}\,GB Speicher und rund \zLLMDocsHochrechnung{} LLM-geprüfte Dokumente mit Kosten von etwa \zLLMKostenHochrechnung{}\,\$ (\cref{fig:B08_hochrechnung}). Die Rechenkosten des Crawls bleiben auch dann einstellig. Die Hochrechnung ist eine \emph{Untergrenze}: Die noch fehlenden Handbücher liegen auf den schwer erreichbaren Seiten (kleine, private, JavaScript, Login), die Ausbeute pro PDF wird dort schlechter sein. Wesentlich realistischer als mehr Crawl-Volumen ist daher ein anderer Weg zu den fehlenden Handbüchern (Discovery, Seitenebene, manuelle Nachsuche in der Liste der \zUnisNone{} leeren Hochschulen und der rund 110 Hochschulen mit Dokumenten, aber ohne bestätigtes Handbuch).
 
 \abb[0.95]{htbp}{B08_hochrechnung}{Lineare Hochrechnung der Erhebung für \zZielwert{} Modulhandbücher (Ist: durchgezogen, Hochrechnung: schraffiert).}

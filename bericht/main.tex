@@ -1,8 +1,5 @@
 % =====================================================================================
 % Projektbericht "Webscraper für Modulhandbücher mit AWS"  (Methoden des Machine Learning, SS 2026)
-% Bauen:  siehe bericht/README.md  (latexmk -pdf main.tex  bzw.  bericht/build.ps1)
-% Zahlen und Grafiken kommen aus  zahlen.tex / bilder/  (erzeugt von make_report_charts.py).
-% Offene Stellen sind mit \TODO{...} gelb markiert, Platzhalter für Sascha Lauk orange.
 % =====================================================================================
 \documentclass[a4paper,11pt,headings=small,parskip=half-,numbers=noenddot,bibliography=totoc]{scrreprt}
 
@@ -91,7 +88,7 @@
   \vfill
   {\small Entstanden im Kontext der Forschungsgruppe KIWIT (BMFTR-gefördert), Forschungsprofil A (Makroebene)\par}
   \vspace{0.3cm}
-  {\footnotesize Entwurfsstand: Zahlen, die noch von laufenden LLM-Prüfungen abhängen, sind aus \texttt{auswertung/data/kennzahlen.json} generiert\\und werden vor der Abgabe aktualisiert (siehe Anhang~\ref{app:repro}).\par}
+  {\footnotesize Quellcode und Commit-Historie: \url{https://github.com/JanSoetebeer/KML}\par}
 \end{titlepage}
 
 \pagenumbering{roman}
@@ -121,7 +118,6 @@ Im Endstand wurden \zDocsTotal{} verschiedene PDFs von \zUnisTotal{} Hochschulen
 \input{kapitel/07_klassifikation}
 \input{kapitel/08_ergebnisse}
 \input{kapitel/09_diskussion}
-\input{kapitel/10_sascha}
 \input{kapitel/11_fazit}
 
 \appendix

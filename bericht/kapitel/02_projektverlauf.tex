@@ -16,17 +16,17 @@ Ein Scrapy-Spider, der PDF- und Word-Dokumente von einer Start-URL herunterlädt
 Der Endlosschleifen-Bug bei Mehrfach-Formaten wird behoben, Jobs laufen asynchron mit Fortschrittsanzeige, ein Terraform-Stack soll die Infrastruktur beschreiben. Der erste TF-IDF-Klassifikator wird trainiert und in die Scraping-Pipeline integriert. Es folgen die Human-in-the-Loop-Feedbackschleife, CI/CD über GitHub Actions und, als Antwort auf das 15-Minuten-Limit von Lambda, der Fargate-Bulk-Pfad (Architektur v2, \cref{sec:arch-v2}). Dominierendes Thema: \emph{Qualität und Skalierung des Crawls}.
 
 \paragraph{Phase 3: Großlauf und Recall-Analyse (KW\,32--36, August bis Anfang September).}
-Am 12.\,August läuft die AWS-Sandbox ab, alle Daten sind verloren; die Umgebung wird über ein Bootstrap-Skript neu aufgebaut, und noch am selben Tag wird der Großlauf über 411 Hochschulen in der neuen Umgebung wiederholt. Die Auswertung zeigt, dass nur ein Teil der erwarteten Handbücher gefunden wurde. Es entstehen das Evaluationsmodul, die Discovery (Common Crawl, Serper, Firecrawl), der OCR-Fallback, die LLM-Zweitstufe und der Seeds-only-Modus (Architektur v3, \cref{sec:arch-v3}). Dominierendes Thema: \emph{Recall}.
+Am 5.\,August wird der Verlust der AWS-Sandbox bemerkt: Daten, Konfiguration und der erste Großlauf über 411 Hochschulen sind weg. Nach Zugang zu einem neuen Pool wird die Umgebung am 12.\,August über ein Bootstrap-Skript neu aufgebaut, und noch am selben Tag wird der Großlauf in der neuen Umgebung wiederholt. Die Auswertung zeigt, dass nur ein Teil der erwarteten Handbücher gefunden wurde. Es entstehen das Evaluationsmodul, die Discovery (Common Crawl, Serper, Firecrawl), der OCR-Fallback, die LLM-Zweitstufe und der Seeds-only-Modus (Architektur v3, \cref{sec:arch-v3}). Dominierendes Thema: \emph{Recall}.
 
 \paragraph{Phase 4: Deep Run und LLM-Bereinigung (KW\,38--40, September bis Oktober).}
 Nach der Budget-Sperre der Sandbox wird der Crawl um Breitensuche und Laufzeit-Wachhund erweitert und als zwölfstündiger Deep Run gestartet (\zDocsTotal{} PDFs kumuliert). Weil die TF-IDF-Positive in großer Zahl falsch sind, werden rund \zLLMReviewed{} Dokumente von einem LLM geprüft, Scans per OCR nachbearbeitet und die Abschlussauswertung mit 23 Grafiken erstellt. Dominierendes Thema: \emph{Precision}.
 
 \section{Wochenweise Aktivität}
-\Cref{tab:wochen-jan} schlüsselt die Aktivität von Jan Soetebeer wochenweise auf. Die Aufgaben stammen aus der Commit-Historie (28 Commits auf \texttt{main}, 42 inklusive Nebenzweigen) und den Entwicklungssitzungen. Die Stundenangaben sind \emph{Schätzungen}; sie wurden anhand der dokumentierten Sitzungs- und Commit-Zeiten sowie des Aufwands für Warte- und Betriebszeiten (Läufe, AWS-Konsole, Recherche) angesetzt \TODO{Stunden von Jan prüfen und anpassen (Quelle: bericht/daten/stunden.csv)}.
+\Cref{tab:wochen-jan} schlüsselt die Aktivität von Jan Soetebeer wochenweise auf. Die Aufgaben stammen aus der Commit-Historie (28 Commits auf \texttt{main}, 42 inklusive Nebenzweigen) und den Entwicklungssitzungen; die Stunden umfassen auch Warte- und Betriebszeiten (Läufe, AWS-Konsole, Recherche). Den Entwurf des Frontends (Aufbau der Oberfläche) hat Sascha Lauk erstellt; die Umsetzung in Code lag bei Jan Soetebeer.
 
 {\small
 \begin{longtable}{@{}l l p{8.9cm} r@{}}
-\caption{Wochenübersicht Jan Soetebeer (Stunden geschätzt).}\label{tab:wochen-jan}\\
+\caption{Wochenübersicht Jan Soetebeer.}\label{tab:wochen-jan}\\
 \toprule
 \textbf{Woche} & \textbf{Zeitraum} & \textbf{Tätigkeiten} & \textbf{Std.} \\
 \midrule
@@ -40,12 +40,12 @@ Nach der Budget-Sperre der Sandbox wird der Crawl um Breitensuche und Laufzeit-W
 \input{wochen_jan.tex}
 \end{longtable}}
 
-\Cref{fig:B01_stunden_pro_woche} zeigt dieselben Werte als Säulendiagramm. Die Spitzen liegen in KW\,30 (CI/CD, Feedback-Loop, fokussierter Crawl und Fargate an zwei Tagen), KW\,28 (Klassifikator und Review-UI) sowie in KW\,33 (Sandbox-Neuaufbau und erster Großlauf). Die Pausen in KW\,31, 37 und 39 sind Urlaubs- bzw. Abwesenheitszeiten, in denen nichts gelaufen ist; das ist für die Budget-Sperre in Kapitel~\ref{ch:aws} relevant. Insgesamt ergeben sich rund \zStundenJan{}~Stunden (Phase~1: \zStundenPhaseEins{}\,h, Phase~2: \zStundenPhaseZwei{}\,h, Phase~3: \zStundenPhaseDrei{}\,h, Phase~4: \zStundenPhaseVier{}\,h).
+\Cref{fig:B01_stunden_pro_woche} zeigt dieselben Werte als Säulendiagramm. Die Spitzen liegen in KW\,30 (CI/CD, Feedback-Loop, fokussierter Crawl und Fargate an zwei Tagen), KW\,28 (Klassifikator und Review-UI) sowie in KW\,33 (Sandbox-Neuaufbau und Wiederholung des Großlaufs). In KW\,37 und KW\,39 war Jan Soetebeer abwesend bzw.\ im Urlaub; das ist für die Budget-Sperre in Kapitel~\ref{ch:aws} relevant. Insgesamt ergeben sich rund \zStundenJan{}~Stunden (Phase~1: \zStundenPhaseEins{}\,h, Phase~2: \zStundenPhaseZwei{}\,h, Phase~3: \zStundenPhaseDrei{}\,h, Phase~4: \zStundenPhaseVier{}\,h).
 
-\abb[0.92]{htbp}{B01_stunden_pro_woche}{Geschätzter Arbeitsaufwand von Jan Soetebeer je Kalenderwoche, eingefärbt nach Projektphase.}
+\abb[0.92]{htbp}{B01_stunden_pro_woche}{Arbeitsaufwand von Jan Soetebeer je Kalenderwoche, eingefärbt nach Projektphase.}
 
 \subsection*{Wochenübersicht Sascha Lauk}
-\saschaPH{Wochenweise Aktivität und Stunden ergänzen. Die Tabelle ist vorbereitet; Zeitraum und Wochen sind identisch zu Tabelle~\ref{tab:wochen-jan}.}
+\saschaPH{Wochenweise Aktivität und Stunden eintragen. Die Tabelle ist vorbereitet; Zeitraum und Wochen sind identisch zu Tabelle~\ref{tab:wochen-jan}.}
 
 {\small
 \begin{longtable}{@{}l l p{8.9cm} r@{}}
@@ -63,10 +63,5 @@ Nach der Budget-Sperre der Sandbox wird der Crawl um Breitensuche und Laufzeit-W
 \input{wochen_sascha.tex}
 \end{longtable}}
 
-\section{Arbeitsteilung}
-Das Projekt wurde von zwei Personen bearbeitet. Der vorliegende Hauptteil des Berichts beschreibt die Arbeiten von Jan Soetebeer: Scraper und Crawl-Strategie, AWS-Umgebung und Betrieb, Klassifikator, Discovery, OCR und LLM-Zweitstufe sowie die Abschlussauswertung. Der Beitrag von Sascha Lauk wird in Kapitel~\ref{ch:sascha} von ihm selbst dargestellt \saschaPH{Aufgabenbereich in zwei bis drei Sätzen}.
-
 \section{Werkzeuge und Arbeitsweise}
-Entwickelt wurde in Python~3.12 mit Git/GitHub (Branches \texttt{main}, \texttt{develop}, \texttt{feature/add-ML-Models}, Pull-Requests), Docker und der AWS-CLI. Bei der Implementierung wurde ein KI-Coding-Assistent (Claude Code) eingesetzt; die Sitzungsprotokolle dienten zusätzlich als Quelle für die Rekonstruktion des Projektverlaufs. In der LLM-Zweitstufe der Pipeline selbst kommt Claude Haiku~4.5 über Amazon Bedrock zum Einsatz (Abschnitt~\ref{sec:llm}). \TODO{Kennzeichnung des KI-Einsatzes mit den Vorgaben der FH Wedel abgleichen}
-
-\paragraph{Umfang der Implementierung.} Das Repository umfasst rund 7.800 Zeilen Python im Crawler (\texttt{webscraper/}, 51 Dateien), rund 2.300 Zeilen im Klassifikator-Paket (\texttt{mlclassifier/}), rund 800 Zeilen in den Auswertungsskripten, rund 1.900 Zeilen Frontend-Code (HTML/CSS/JavaScript) und rund 1.800 Zeilen Infrastruktur- und Workflow-Dateien (Bootstrap-Skript, GitHub-Actions-Workflows, Terraform).
+Entwickelt wurde in Python~3.12 mit Git/GitHub (Branches \texttt{main}, \texttt{develop}, \texttt{feature/add-ML-Models}, Pull-Requests), Docker und der AWS-CLI. Für die Coding-Aufgaben wurde ein KI-Assistent (Claude Code) eingesetzt. In der LLM-Zweitstufe der Pipeline selbst kommt Claude Haiku~4.5 über Amazon Bedrock zum Einsatz (Abschnitt~\ref{sec:llm}).
