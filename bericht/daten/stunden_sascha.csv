@@ -1,0 +1,18 @@
+kw,stunden_sascha,taetigkeit
+24,20,"Projektstart; Scrapy-Prototyp (DocumentSpider, PDF/Word-Download); JobRunner mit parallelen Jobs; Visited-Store; erstes Architekturdiagramm (Architektur v1)"
+25,4,"Einarbeitung in die AWS-Umgebung (Lambda, ECR, IAM), aufwändig und komplex"
+26,25,"Erstellung des Frontend Designs; Frontend-Grundgerüst (Login, Tabs) umgesetzt nach dem Entwurf von Sascha"
+27,10,"Authentifizierung (bcrypt, Session-Token); Hosting der Webapp auf EC2 mit Docker Compose und Caddy; Rollen- und Modellverwaltung"
+28,8,"Endlosschleifen-Bug (Timeout bei Mehrfach-Formaten) behoben; asynchrone Jobs mit Fortschrittsanzeige; Terraform-Stack; Tiefen-Crawl; Ergebnis- und Review-UI; erster Klassifikator (TF-IDF + logistische Regression, Gruppen-Kreuzvalidierung); Scraper-Integration"
+29,12,MVP-Präsentation erstellt (15.07.-16.07.); Deployment-Versuche Lambda-Image und EC2; Klassifikator in Lambda-Image eingebettet
+30,13,"Human-in-the-Loop-Feedbackschleife (Review-UI, S3-Feedback, Nachtraining); CI/CD mit GitHub Actions (OIDC, SSM); CSV-Import der Hochschulliste; Skalierungs-Roadmap; fokussierter Crawl (Best-First, Sitemap, Subdomains); Extraktionsprofile; Fargate-Bulk-Pfad (Architektur v2)"
+31,3,Kleine Fixes und Bugbehebung
+32,4,"Verlust der Sandbox (Pool 11) am 05.08. bemerkt: Daten, Konfiguration und der erste Großlauf weg; Planung der Evaluation"
+33,10,"Neuaufbau der AWS-Umgebung in neuem Pool (Bootstrap-Skript); Wiederholung des Großlaufs über 411 Hochschulen (6,3 h); Evaluationsmodul mit HTML-Bericht"
+34,7,Recall-Analyse (145 Hochschulen ohne Treffer); Schwellenwert-Anpassung; Discovery-Modul (Common Crawl); OCR-Fallback
+35,7,Serper- und Firecrawl-Anbindung; LLM-Zweitstufe auf Amazon Bedrock; End-to-End-Test auf Beispielhochschulen
+36,10,Webapp-Schalter für Discovery/Rendering; parallele Bedrock-Aufrufe; Nachtraining mit 5.000+ Modulhandbüchern; Seeds-only-Modus; Per-Hochschule-Diagnose; Seeds-only-Lauf (+43 Hochschulen)
+37,8,Händische Bewertung Falschklassifizierten Dokumenten
+38,10,"Budget-Sperre der Sandbox analysiert; Robots-Bypass für Discovery-Seeds; Fehler in der Evaluation (LLM-Urteile überschrieben) behoben; Breadth-Fairness und Watchdog; Deep Run (12 h, 132.193 PDFs)"
+39,2,Prüfung des Codes auf Verbesserungsmöglichkeiten
+40,13,Abschlusspräsentation und Projektbericht

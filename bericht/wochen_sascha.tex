@@ -1,20 +1,20 @@
 % Wochenübersicht Sascha Lauk
-KW\,24 & 08.06.--14.06. & \saschaCell{} & \saschaCell{} \\
-KW\,25 & 15.06.--21.06. & \saschaCell{} & \saschaCell{} \\
-KW\,26 & 22.06.--28.06. & \saschaCell{} & \saschaCell{} \\
-KW\,27 & 29.06.--05.07. & \saschaCell{} & \saschaCell{} \\
-KW\,28 & 06.07.--12.07. & \saschaCell{} & \saschaCell{} \\
-KW\,29 & 13.07.--19.07. & \saschaCell{} & \saschaCell{} \\
-KW\,30 & 20.07.--26.07. & \saschaCell{} & \saschaCell{} \\
-KW\,31 & 27.07.--02.08. & \saschaCell{} & \saschaCell{} \\
-KW\,32 & 03.08.--09.08. & \saschaCell{} & \saschaCell{} \\
-KW\,33 & 10.08.--16.08. & \saschaCell{} & \saschaCell{} \\
-KW\,34 & 17.08.--23.08. & \saschaCell{} & \saschaCell{} \\
-KW\,35 & 24.08.--30.08. & \saschaCell{} & \saschaCell{} \\
-KW\,36 & 31.08.--06.09. & \saschaCell{} & \saschaCell{} \\
-KW\,37 & 07.09.--13.09. & \saschaCell{} & \saschaCell{} \\
-KW\,38 & 14.09.--20.09. & \saschaCell{} & \saschaCell{} \\
-KW\,39 & 21.09.--27.09. & \saschaCell{} & \saschaCell{} \\
-KW\,40 & 28.09.--04.10. & \saschaCell{} & \saschaCell{} \\
+KW\,24 & 08.06.--14.06. & Projektstart; Scrapy-Prototyp (DocumentSpider, PDF/Word-Download); JobRunner mit parallelen Jobs; Visited-Store; erstes Architekturdiagramm (Architektur v1) & 20 \\
+KW\,25 & 15.06.--21.06. & Einarbeitung in die AWS-Umgebung (Lambda, ECR, IAM), aufwändig und komplex & 4 \\
+KW\,26 & 22.06.--28.06. & Erstellung des Frontend Designs; Frontend-Grundgerüst (Login, Tabs) umgesetzt nach dem Entwurf von Sascha & 25 \\
+KW\,27 & 29.06.--05.07. & Authentifizierung (bcrypt, Session-Token); Hosting der Webapp auf EC2 mit Docker Compose und Caddy; Rollen- und Modellverwaltung & 10 \\
+KW\,28 & 06.07.--12.07. & Endlosschleifen-Bug (Timeout bei Mehrfach-Formaten) behoben; asynchrone Jobs mit Fortschrittsanzeige; Terraform-Stack; Tiefen-Crawl; Ergebnis- und Review-UI; erster Klassifikator (TF-IDF + logistische Regression, Gruppen-Kreuzvalidierung); Scraper-Integration & 8 \\
+KW\,29 & 13.07.--19.07. & MVP-Präsentation erstellt (15.07.-16.07.); Deployment-Versuche Lambda-Image und EC2; Klassifikator in Lambda-Image eingebettet & 12 \\
+KW\,30 & 20.07.--26.07. & Human-in-the-Loop-Feedbackschleife (Review-UI, S3-Feedback, Nachtraining); CI/CD mit GitHub Actions (OIDC, SSM); CSV-Import der Hochschulliste; Skalierungs-Roadmap; fokussierter Crawl (Best-First, Sitemap, Subdomains); Extraktionsprofile; Fargate-Bulk-Pfad (Architektur v2) & 13 \\
+KW\,31 & 27.07.--02.08. & Kleine Fixes und Bugbehebung & 3 \\
+KW\,32 & 03.08.--09.08. & Verlust der Sandbox (Pool 11) am 05.08. bemerkt: Daten, Konfiguration und der erste Großlauf weg; Planung der Evaluation & 4 \\
+KW\,33 & 10.08.--16.08. & Neuaufbau der AWS-Umgebung in neuem Pool (Bootstrap-Skript); Wiederholung des Großlaufs über 411 Hochschulen (6,3 h); Evaluationsmodul mit HTML-Bericht & 10 \\
+KW\,34 & 17.08.--23.08. & Recall-Analyse (145 Hochschulen ohne Treffer); Schwellenwert-Anpassung; Discovery-Modul (Common Crawl); OCR-Fallback & 7 \\
+KW\,35 & 24.08.--30.08. & Serper- und Firecrawl-Anbindung; LLM-Zweitstufe auf Amazon Bedrock; End-to-End-Test auf Beispielhochschulen & 7 \\
+KW\,36 & 31.08.--06.09. & Webapp-Schalter für Discovery/Rendering; parallele Bedrock-Aufrufe; Nachtraining mit 5.000+ Modulhandbüchern; Seeds-only-Modus; Per-Hochschule-Diagnose; Seeds-only-Lauf (+43 Hochschulen) & 10 \\
+KW\,37 & 07.09.--13.09. & Händische Bewertung Falschklassifizierten Dokumenten & 8 \\
+KW\,38 & 14.09.--20.09. & Budget-Sperre der Sandbox analysiert; Robots-Bypass für Discovery-Seeds; Fehler in der Evaluation (LLM-Urteile überschrieben) behoben; Breadth-Fairness und Watchdog; Deep Run (12 h, 132.193 PDFs) & 10 \\
+KW\,39 & 21.09.--27.09. & Prüfung des Codes auf Verbesserungsmöglichkeiten & 2 \\
+KW\,40 & 28.09.--04.10. & Abschlusspräsentation und Projektbericht & 13 \\
 \midrule
-\multicolumn{3}{l}{\textbf{Summe}} & \saschaCell{} \\
+\multicolumn{3}{l}{\textbf{Summe}} & \textbf{166} \\

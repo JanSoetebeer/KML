@@ -123,6 +123,8 @@ ax.legend(handles=[Patch(color=PHASE_COL[k], label=v) for k, v in phase_names.it
 ax.grid(axis="x", visible=False)
 save(fig, "B01_stunden_pro_woche")
 Z["StundenJan"] = de(sum(vals), 0)
+Z["StundenSascha"] = de(sum(float(r["stunden_sascha"]) for r in csv.DictReader(
+    open(BER / "daten" / "stunden_sascha.csv", encoding="utf-8"))), 0)
 
 # kumuliert je Phase
 ph_sum = defaultdict(float)
@@ -541,12 +543,18 @@ with open(BER / "wochen_jan.tex", "w", encoding="utf-8") as f:
         f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & {r['taetigkeit']} & {de(h, 0)} \\\\\n")
     f.write("\\midrule\n")
     f.write(f"\\multicolumn{{3}}{{l}}{{\\textbf{{Summe}}}} & \\textbf{{{de(total, 0)}}} \\\\\n")
+sascha = {r["kw"]: r for r in csv.DictReader(open(BER / "daten" / "stunden_sascha.csv", encoding="utf-8"))}
 with open(BER / "wochen_sascha.tex", "w", encoding="utf-8") as f:
     f.write("% Wochenübersicht Sascha Lauk\n")
+    total_s = 0.0
     for r in stunden:
-        f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & \\saschaCell{{}} & \\saschaCell{{}} \\\\\n")
+        sr = sascha[r["kw"]]
+        h = float(sr["stunden_sascha"])
+        total_s += h
+        f.write(f"KW\\,{r['kw']} & {r['von']}--{r['bis']} & {sr['taetigkeit']} & {de(h, 0)} \\\\\n")
     f.write("\\midrule\n")
-    f.write("\\multicolumn{3}{l}{\\textbf{Summe}} & \\saschaCell{} \\\\\n")
+    f.write(f"\\multicolumn{{3}}{{l}}{{\\textbf{{Summe}}}} & \\textbf{{{de(total_s, 0)}}} \\\\\n")
+Z["StundenSascha"] = de(total_s, 0)
 
 # ---------------------------------------------------------------- Auswertungs-Grafiken kopieren
 for p in sorted((AUSW / "charts").glob("*.png")):

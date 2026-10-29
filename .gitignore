@@ -41,3 +41,5 @@ mlclassifier/artifacts/*.jsonl
 # Run manifests / LLM + OCR result files (100+ MB, regenerable from S3 + scripts)
 /*.jsonl
 auswertung/data/*.jsonl
+
+auswertung/.datahub_uploaded.txt*
